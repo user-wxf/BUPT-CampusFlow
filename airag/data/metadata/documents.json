@@ -2,6 +2,7 @@
   {
     "id": "deferred_exam_001",
     "service": "缓考申请",
+    "college":"all",
     "grade": "all",
     "education_level": "本科",
     "campus": "all",
@@ -13,11 +14,12 @@
   {
     "id": "deferred_exam_002",
     "service": "缓考申请",
+    "college":"all",
     "grade": "all",
     "education_level": "本科",
     "campus": "all",
     "source": "本科生期末考试缓考申请及审批操作说明",
-    "updated_at": "2026_06_04",
+    "updated_at": "null",
     "status": "active",
     "file": "airag/data/raw/deferred_exam/本科生期末考试缓考申请及审批操作说明.pdf"
   }
