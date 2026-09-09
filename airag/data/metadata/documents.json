@@ -19,7 +19,7 @@
     "education_level": "本科",
     "campus": "all",
     "source": "本科生期末考试缓考申请及审批操作说明",
-    "updated_at": "null",
+    "updated_at": null,
     "status": "active",
     "file": "airag/data/raw/deferred_exam/本科生期末考试缓考申请及审批操作说明.pdf"
   }
