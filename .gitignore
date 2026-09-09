@@ -1,0 +1,29 @@
+# =========================
+# 不上传GitHub的一些文件
+# =========================
+
+# 本地真实环境变量文件，不上传 GitHub
+.env
+
+# Python 虚拟环境
+.venv/
+venv/
+
+# Python 缓存文件
+__pycache__/
+*.pyc
+
+# npm 安装的依赖
+node_modules/
+
+# Vue 构建后的产物
+frontend/dist/
+
+# 本地 SQLite 数据库文件
+*.db
+
+# VS Code 配置
+.vscode/
+
+# JetBrains / PyCharm / IDEA 配置
+.idea/
