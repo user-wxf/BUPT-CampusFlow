@@ -13,7 +13,7 @@
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-$env:JWT_SECRET = (.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))")
+$env:JWT_SECRET_KEY = (.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))")
 $env:RAG_MODE = 'demo'
 .\.venv\Scripts\python.exe -m app.create_admin admin
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
@@ -23,7 +23,11 @@ $env:RAG_MODE = 'demo'
 
 打开 [交互式接口文档](http://127.0.0.1:8000/docs)。先通过登录接口获取 `data.access_token`，再点击 Authorize 输入 token。
 
-SQLite 数据库首次启动时创建在当前目录 `youzhiban.db`。`.env.example` 是环境变量说明，不会自动加载。若修改数据库结构，需另外编写迁移；当前 `create_all` 只负责新建缺失表。
+SQLite 数据库首次启动时创建在当前工作目录，文件名为 `youzhiban.db`（默认配置）。
+
+后端自动读取项目根目录的 `.env`；已经设置的系统环境变量优先。本地真实 `.env` 不提交到 GitHub。
+
+若修改数据库结构，需另外编写迁移；当前 `create_all` 只负责新建缺失表，不会更新已有表结构。
 
 ## 2. 给 A 的接口约定
 
