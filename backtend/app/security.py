@@ -1,3 +1,8 @@
+from pathlib import Path
+from dotenv import load_dotenv
+
+# security.py → app → backend → 项目根目录
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 import hashlib
 import hmac
 import os
@@ -13,9 +18,9 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def secret():
-    value = os.getenv('JWT_SECRET', '')
+    value = os.getenv('JWT_SECRET_KEY', '')
     if len(value) < 32:
-        raise RuntimeError('JWT_SECRET 必须设置为至少32字符的随机字符串')
+        raise RuntimeError('JWT_SECRET_KEY 必须设置为至少32字符的随机字符串')
     return value
 
 

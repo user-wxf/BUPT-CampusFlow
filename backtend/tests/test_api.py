@@ -1,5 +1,5 @@
 import os
-os.environ['JWT_SECRET'] = 'test-only-secret-' * 4
+os.environ['JWT_SECRET_KEY'] = 'test-only-secret-' * 4
 os.environ['RAG_MODE'] = 'demo'
 
 import jwt
@@ -56,7 +56,7 @@ def test_auth_and_validation(client):
     r = client.post('/api/auth/register', json={'username': 'abc', 'password': 'short'})
     assert r.status_code == 422 and 'short' not in r.text
     expired = jwt.encode({'sub': '1', 'iss': 'youzhiban', 'iat': datetime.now(timezone.utc) - timedelta(hours=3),
-                          'exp': datetime.now(timezone.utc) - timedelta(hours=1)}, os.environ['JWT_SECRET'], algorithm='HS256')
+                          'exp': datetime.now(timezone.utc) - timedelta(hours=1)}, os.environ['JWT_SECRET_KEY'], algorithm='HS256')
     assert client.get('/api/auth/me', headers={'Authorization': 'Bearer ' + expired}).status_code == 401
 
 
