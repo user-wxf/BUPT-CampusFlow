@@ -12,7 +12,7 @@ venv/
 # Python 缓存文件
 __pycache__/
 *.pyc
-
+.pytest_cache/
 # npm 安装的依赖
 node_modules/
 
