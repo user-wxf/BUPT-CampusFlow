@@ -12,11 +12,13 @@ async function testBackendConnection() {
     const response = await fetch('/api/health')
     const data = await response.json()
 
-    if (!response.ok || !data.success) {
+    if (!response.ok || data.code !== 0) {
       throw new Error(data.message || '后端返回异常')
     }
 
-    status.value = `✅ ${data.message}`
+    status.value = data.data?.status === 'ok'
+      ? '✅ 邮智办后端运行正常'
+      : `✅ ${data.message || '后端连接成功'}`
   } catch (error) {
     status.value = `连接失败：${error.message || '请确认 FastAPI 服务已启动'}`
   } finally {
