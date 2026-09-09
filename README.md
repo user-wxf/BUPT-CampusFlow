@@ -1,4 +1,4 @@
-<img width="1700" height="1450" alt="project-structure-mindmap" src="https://github.com/user-attachments/assets/d0429afe-841a-4c30-bc3e-dd442232747a" />第一次加入项目的组员，应优先阅读本文，明确：
+第一次加入项目的组员，应优先阅读本文，明确：
 
 - 项目要解决什么问题；
 - 系统整体技术架构是什么；
