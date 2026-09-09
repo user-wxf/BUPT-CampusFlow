@@ -1,0 +1,26 @@
+[
+  {
+    "id": "deferred_exam_001",
+    "service": "缓考申请",
+    "college":"all",
+    "grade": "all",
+    "education_level": "本科",
+    "campus": "all",
+    "source": "北京邮电大学本科生课程考核与成绩管理实施细则（校发〔2022〕86号）",
+    "updated_at": "2022-12-29",
+    "status": "active",
+    "file": "airag/data/raw/deferred_exam/北京邮电大学本科生课程考核与成绩管理实施细则（校发〔2022〕86号）.pdf"
+  },
+  {
+    "id": "deferred_exam_002",
+    "service": "缓考申请",
+    "college":"all",
+    "grade": "all",
+    "education_level": "本科",
+    "campus": "all",
+    "source": "本科生期末考试缓考申请及审批操作说明",
+    "updated_at": null,
+    "status": "active",
+    "file": "airag/data/raw/deferred_exam/本科生期末考试缓考申请及审批操作说明.pdf"
+  }
+]
