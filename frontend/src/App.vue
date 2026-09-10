@@ -1,69 +1,33 @@
 <script setup>
-import { ref } from 'vue'
-
-const status = ref('未连接')
-const isConnecting = ref(false)
-
-async function testBackendConnection() {
-  isConnecting.value = true
-  status.value = '正在连接…'
-
-  try {
-    const response = await fetch('/api/health')
-    const data = await response.json()
-
-    if (!response.ok || data.code !== 0) {
-      throw new Error(data.message || '后端返回异常')
-    }
-
-    status.value = data.data?.status === 'ok'
-      ? '✅ 邮智办后端运行正常'
-      : `✅ ${data.message || '后端连接成功'}`
-  } catch (error) {
-    status.value = `连接失败：${error.message || '请确认 FastAPI 服务已启动'}`
-  } finally {
-    isConnecting.value = false
-  }
-}
+import { onMounted, ref } from 'vue'
+import { request } from './api/client'
+const page=ref('login'), busy=ref(false), notice=ref(''), bad=ref(false), user=ref(null), health=ref('未连接'), result=ref(null), todos=ref([]), history=ref([])
+const mode=ref('login'), auth=ref({username:'',password:''}), profile=ref({college:'',grade:'',education_level:'本科',campus:''}), question=ref('我想申请缓考'), todo=ref({title:'',notes:''})
+const say=(x,e=false)=>{notice.value=x;bad.value=e}; const fail=e=>say(e.message||'请求失败',true)
+async function healthCheck(){health.value='正在连接…';try{const d=await request({url:'/health'});health.value=d?.status==='ok'?'✅ 邮智办后端运行正常':'✅ 后端连接成功'}catch(e){health.value=`连接失败：${e.message}`}}
+async function load(){const [p,t,h]=await Promise.all([request({url:'/profile'}),request({url:'/todos'}),request({url:'/history'})]);profile.value=p||profile.value;todos.value=t||[];history.value=h||[]}
+async function submitAuth(){busy.value=true;notice.value='';try{if(mode.value==='register'){await request({method:'post',url:'/auth/register',data:auth.value});mode.value='login';say('注册成功，请登录。')}else{const d=await request({method:'post',url:'/auth/login',data:auth.value});localStorage.setItem('campusflow_token',d.access_token);user.value=d.user;await load();page.value='query';say('登录成功。')}}catch(e){fail(e)}finally{busy.value=false}}
+function logout(){localStorage.removeItem('campusflow_token');user.value=null;page.value='login'}
+async function saveProfile(){try{profile.value=await request({method:'put',url:'/profile',data:profile.value});say('画像已保存。')}catch(e){fail(e)}}
+async function query(){busy.value=true;try{result.value=await request({method:'post',url:'/query',data:{question:question.value}});history.value=await request({url:'/history'});page.value='result'}catch(e){fail(e)}finally{busy.value=false}}
+async function reloadTodos(){todos.value=await request({url:'/todos'})}
+async function addTodo(){try{await request({method:'post',url:'/todos',data:{...todo.value,completed:false,due_at:null}});todo.value={title:'',notes:''};await reloadTodos()}catch(e){fail(e)}}
+async function toggle(t){try{await request({method:'put',url:`/todos/${t.id}`,data:{title:t.title,notes:t.notes||'',completed:!t.completed,due_at:t.due_at||null}});await reloadTodos()}catch(e){fail(e)}}
+async function removeTodo(id){try{await request({method:'delete',url:`/todos/${id}`});await reloadTodos()}catch(e){fail(e)}}
+async function addSteps(plan){try{await Promise.all((plan.steps||[]).map(title=>request({method:'post',url:'/todos',data:{title,notes:`来自：${plan.title}`,completed:false,due_at:null}})));await reloadTodos();page.value='todos';say('办理步骤已加入待办。')}catch(e){fail(e)}}
+async function removeHistory(id){try{await request({method:'delete',url:`/history/${id}`});history.value=await request({url:'/history'})}catch(e){fail(e)}}
+onMounted(async()=>{healthCheck();if(!localStorage.getItem('campusflow_token'))return;try{user.value=await request({url:'/auth/me'});await load();page.value='query'}catch{logout()}})
 </script>
-
 <template>
-  <main class="page">
-    <h1>邮智办</h1>
-    <p>北邮校园事务智能办理助手</p>
-
-    <button type="button" :disabled="isConnecting" @click="testBackendConnection">
-      {{ isConnecting ? '连接中…' : '测试后端连接' }}
-    </button>
-
-    <p class="status">后端状态：{{ status }}</p>
-  </main>
+<header><b>邮智办</b><span>北邮校园事务智能办理助手</span><small>后端状态：{{health}}</small></header><main class="page"><p v-if="notice" :class="['notice',{bad}]">{{notice}}</p>
+<section v-if="!user" class="card auth"><h1>{{mode==='login'?'登录':'注册学生账号'}}</h1><p>账号仅限字母、数字、下划线；密码至少 8 位。</p><form @submit.prevent="submitAuth"><input v-model.trim="auth.username" placeholder="账号" minlength="3" required><input v-model="auth.password" type="password" placeholder="密码" minlength="8" required><button :disabled="busy">{{busy?'处理中…':mode==='login'?'登录':'注册'}}</button></form><button class="link" @click="mode=mode==='login'?'register':'login'">{{mode==='login'?'没有账号？注册':'已有账号？登录'}}</button><button class="secondary" @click="healthCheck">测试后端连接</button></section>
+<template v-else><nav><button v-for="x in [['query','智能办理'],['profile','我的画像'],['todos','待办'],['history','历史']]" :key="x[0]" :class="{active:page===x[0]}" @click="page=x[0]">{{x[1]}}</button><button class="link" @click="logout">退出（{{user.username}}）</button></nav>
+<section v-if="page==='query'" class="card"><h1>智能事务查询</h1><p>后端将结合用户画像、结构化数据与 RAG 知识库生成方案。</p><form @submit.prevent="query"><textarea v-model.trim="question" rows="5" maxlength="2000" required></textarea><button :disabled="busy">{{busy?'生成中…':'获取办理方案'}}</button></form></section>
+<section v-if="page==='profile'" class="card"><h1>我的画像</h1><form @submit.prevent="saveProfile"><input v-model.trim="profile.college" placeholder="学院"><input v-model.trim="profile.grade" placeholder="年级，例如 2024"><select v-model="profile.education_level"><option>本科</option><option>硕士</option><option>博士</option></select><input v-model.trim="profile.campus" placeholder="校区，例如 沙河"><button>保存画像</button></form></section>
+<section v-if="page==='result'" class="card"><template v-if="result"><h1>办理方案</h1><p>{{result.answer}}</p><small>生成模式：{{result.mode}}</small><article v-for="plan in result.plans||[]" :key="plan.affair_id||plan.title" class="plan"><h2>{{plan.title}}</h2><h3>所需材料</h3><ul><li v-for="x in plan.materials" :key="x">{{x}}</li></ul><h3>办理步骤</h3><ol><li v-for="x in plan.steps" :key="x">{{x}}</li></ol><p><b>地点：</b>{{plan.location||'暂无'}} {{plan.room}}</p><p><b>联系人：</b>{{plan.contact||'暂无'}}；<b>办公时间：</b>{{plan.office_hours||'暂无'}}</p><button @click="addSteps(plan)">将步骤加入待办</button></article><p v-if="!(result.plans||[]).length">暂无可办理计划。</p><h3>来源</h3><ul><li v-for="s in result.sources||[]" :key="s.title+s.reference">{{s.title}}：{{s.reference}}</li></ul><p v-for="w in result.warnings||[]" :key="w" class="warning">注意：{{w}}</p></template><p v-else>请先提交查询。</p></section>
+<section v-if="page==='todos'" class="card"><h1>待办</h1><form class="inline" @submit.prevent="addTodo"><input v-model.trim="todo.title" placeholder="待办标题" required><input v-model.trim="todo.notes" placeholder="备注（可选）"><button>添加</button></form><p v-if="!todos.length">暂无待办。</p><article v-for="t in todos" :key="t.id" class="row"><input :checked="t.completed" type="checkbox" @change="toggle(t)"><span :class="{done:t.completed}">{{t.title}} <small>{{t.notes}}</small></span><button class="link danger" @click="removeTodo(t.id)">删除</button></article></section>
+<section v-if="page==='history'" class="card"><h1>查询历史</h1><p v-if="!history.length">暂无历史记录。</p><article v-for="h in history" :key="h.id" class="row"><span><b>{{h.question}}</b><small> {{h.created_at}}</small></span><button class="link" @click="result=h.result;page='result'">查看</button><button class="link danger" @click="removeHistory(h.id)">删除</button></article></section></template></main>
 </template>
-
-<style scoped>
-.page {
-  max-width: 520px;
-  margin: 80px auto;
-  padding: 32px;
-  text-align: center;
-  font-family: "Microsoft YaHei", sans-serif;
-}
-
-button {
-  padding: 10px 18px;
-  border: 0;
-  border-radius: 6px;
-  background: #1f5fbf;
-  color: #fff;
-  cursor: pointer;
-}
-
-button:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
-.status {
-  margin-top: 24px;
-}
+<style>
++:root{font-family:"Microsoft YaHei",sans-serif;color:#1d2a3a;background:#f4f7fb}body{margin:0}header{display:flex;gap:12px;align-items:center;padding:16px max(20px,calc((100% - 900px)/2));color:#fff;background:#174a9c}header b{font-size:22px}header small{margin-left:auto}.page{max-width:900px;margin:32px auto;padding:0 20px}.card{padding:28px;background:#fff;border-radius:10px;box-shadow:0 4px 18px #173d7814}.auth{max-width:440px;margin:60px auto}form{display:grid;gap:12px}input,textarea,select{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}button{padding:10px 16px;border:0;border-radius:6px;background:#1f5fbf;color:#fff;cursor:pointer;font:inherit}.link{color:#1f5fbf;background:transparent}.secondary{margin-top:12px;background:#60718a}.notice{padding:12px;color:#166534;background:#dcfce7;border-radius:6px}.bad{color:#991b1b;background:#fee2e2}nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}nav button{color:#294666;background:#e6edf8}nav .active{color:#fff;background:#1f5fbf}nav .link{margin-left:auto}.plan{margin:20px 0;padding:18px;border:1px solid #dbe4f0;border-radius:8px}.inline{grid-template-columns:1fr 1fr auto}.row{display:flex;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid #e7edf5}.row span{flex:1}.done{color:#64748b;text-decoration:line-through}.danger{color:#bd2330}.warning{color:#9a5b00}@media(max-width:600px){header{align-items:flex-start;flex-direction:column}header small,nav .link{margin-left:0}.inline{grid-template-columns:1fr}}
 </style>
