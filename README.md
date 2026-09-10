@@ -1,1178 +1,334 @@
-第一次加入项目的组员，应优先阅读本文，明确：
+# 邮智办——北邮校园事务智能办理助手
 
-- 项目要解决什么问题；
-- 系统整体技术架构是什么；
-- 自己主要负责哪些模块；
-- 自己应该修改哪些目录；
-- 哪些目录不要随便修改；
-- 三个人之间如何通过接口协作；
-- 项目如何在本地启动；
-- GitHub 代码如何拉取、开发、提交、合并；
-- 多人协作时如何避免代码冲突；
-- 每天开始和结束开发时分别应该做什么。
+## 项目简介
 
-> 说明：本文描述的是当前课程项目的设计和协作约定。若代码尚未完全实现，相关内容均表示计划或预期方式，最终以实际代码和 `docs/` 下文档为准。
+邮智办是面向北京邮电大学学生的校园事务智能办理助手，目标是把分散在制度文件、办事说明、考试安排和结构化事务数据中的信息，整理成学生可以理解和执行的办理建议。用户可以用自然语言提出问题，例如缓考、转专业、奖助学金、勤工助学、毕业结业等场景，系统会结合用户画像和知识库检索结果返回个性化说明。
 
----
+与普通校园办事门户不同，本项目不是让学生在多个页面中手动查找制度条款，而是通过“浏览器前端 → 业务后端 → AI/RAG 服务”的三层结构，将用户画像、Metadata Filtering、校园政策知识库、结构化数据和 DeepSeek 生成能力组合起来，形成可追溯的办理指导。精确地点、联系人、办公时间、考试安排等信息只在资料或结构化数据中存在时展示，不由模型自行编造。
 
-## 一、项目背景
+## 核心功能
 
-**项目名称：** 邮智办 - 北邮校园事务智能办理助手
+- 用户登录与身份认证：支持注册、登录、JWT 签发与 Bearer Token 自动携带，后端对用户接口进行鉴权。
+- 用户画像：保存学院、年级、培养层次、校区和邮箱等信息，用于智能查询时的个性化过滤和邮件提醒。
+- 校园事务自然语言查询：前端提交用户问题，业务后端调用 AI/RAG 服务生成回答、办理方案、来源和注意事项。
+- Metadata Filtering 个性化过滤：AI/RAG 服务按 college、grade、education_level、campus 等元数据过滤适用 Chunk。
+- RAG 知识库检索：基于 `airag/data/chunks/chunks.jsonl` 与本地 `airag/vector_db/chunks.json` 进行向量检索，异常时保留关键词检索兜底。
+- DeepSeek / LLM 生成：AI/RAG 服务读取 `DEEPSEEK_API_KEY` 调用 DeepSeek；未配置或调用失败时按代码逻辑返回基于检索内容的兜底回答。
+- 政策来源与依据追溯：查询结果返回来源文件名和页码；后端与 AI/RAG 服务保留来源详情查询接口，但当前前端主要展示来源文件名与页码。
+- 结构化办理步骤：结果页按 AI 办理建议、办理方案、所需材料、办理步骤、已知办理信息、信息来源和注意事项展示。
+- 一键加入待办：可将办理方案中的有效步骤批量写入当前用户 Todo。
+- DDL / 截止时间：Todo 支持 `due_at` 截止时间、完成状态、到期状态展示和修改。
+- 邮件提醒：后端定时检查即将到期的 Todo，按用户画像中的邮箱发送提醒；SMTP 支持 SSL、STARTTLS 和 none 三种模式。
+- 查询历史：保存用户智能查询记录，支持列表查看、回看结果和删除。
 
-**项目定位：** 面向北京邮电大学学生的校园事务智能办理助手。
+## 技术栈
 
-本系统不是简单的大模型聊天机器人，而是希望将学校官网、学院通知、制度文件、办事指南以及结构化事务数据，转化成符合学生个人身份的可执行办理方案。
+- 前端：Vue 3、Vite、Axios、原生 CSS。
+- 业务后端：FastAPI、Pydantic、SQLAlchemy、PyJWT、SQLite、httpx。
+- AI/RAG 服务：FastAPI、Pydantic、fastembed、NumPy、本地向量库 JSON、Metadata Filtering、RAG Context Builder、DeepSeek API。
+- 数据库：SQLite，默认数据库地址由 `DATABASE_URL` 控制，代码默认值为 `sqlite:///./youzhiban.db`。
+- Embedding：默认使用 `BAAI/bge-small-zh-v1.5`，由 `fastembed` 在构建向量库时使用。
+- 邮件：Python `smtplib`，支持 `SMTP_SSL`、`SMTP + starttls()` 和无加密连接。
 
-系统主要结合：
-
-- 用户画像
-- 结构化事务数据库
-- RAG 知识库
-- Metadata Filtering
-- Context Builder
-- DeepSeek API
-- 待办管理
-
-用户输入自然语言事务需求后，系统根据学院、年级、培养层次、校区等用户画像筛选适用资料，并最终生成：
-
-- 办理条件
-- 材料清单
-- 办理流程
-- 地点
-- 负责人
-- 办公时间
-- 注意事项
-- 信息来源
-- 可加入个人待办的办理步骤
-
-需要特别注意：
-
-- RAG 主要处理学校制度、通知、办事指南等非结构化长文本。
-- SQLite 结构化数据库主要保存用户、用户画像、事务、地点、房间、负责人、办公时间、联系方式、待办、查询记录、权限、管理员操作记录等结构化数据。
-- 大模型不得自行生成地点、老师姓名、联系方式、办公时间等高精度信息。这类信息应优先来自结构化数据库或可追溯来源。
-
----
-
-## 二、整体技术架构
-
-当前设计采用 B/S 架构。浏览器访问 Vue 3 + Vite 前端，前端通过 HTTP + JSON 调用 FastAPI 后端。后端负责认证、权限、业务数据、查询流程编排，并在智能查询场景中调用 RAG 模块和 DeepSeek API，最终将结构化办理方案返回前端展示。
+整体调用关系：
 
 ```text
-浏览器
-│
-▼
-Vue 3 + Vite
-学生端 / 管理员端
-│
-│ HTTP + JSON
-▼
-FastAPI
-│
-├── 登录认证
-├── 权限管理
-├── 用户画像
-├── 事务业务逻辑
-├── 待办管理
-└── 查询流程编排
-     │
-     ├───────────────┐
-     ▼               ▼
-SQLite             RAG模块
-结构化数据           │
-                     ├ 文档解析
-                     ├ Chunk
-                     ├ Embedding
-                     ├ Vector DB
-                     └ Metadata Filtering
-     │               │
-     └───────┬───────┘
-             ▼
-       Context Builder
-             │
-             ▼
-        DeepSeek API
-             │
-             ▼
-       结构化办理方案
-             │
-             ▼
-         FastAPI
-             │
-             ▼
-          Vue展示
+浏览器前端（Vue / Vite）
+  ↓ /api
+业务后端 B（FastAPI / SQLite / JWT / Todo / History / Reminder）
+  ↓ RAG_URL
+AI/RAG 服务 C（检索 / Metadata Filtering / DeepSeek）
 ```
 
-各层说明：
-
-| 层级 | 当前设计职责 |
-| --- | --- |
-| 浏览器 | 学生和管理员通过浏览器使用系统。 |
-| Vue 3 + Vite | 负责学生端、管理员端页面展示、表单输入、交互状态和 API 调用。 |
-| FastAPI | 负责后端接口、认证鉴权、权限管理、业务流程编排和统一响应。 |
-| SQLite | 保存用户、画像、事务、待办、查询记录、管理员日志等结构化业务数据。 |
-| RAG 模块 | 处理制度、通知、办事指南等非结构化资料，完成解析、切片、向量化、检索和过滤。 |
-| Context Builder | 将用户画像、结构化数据和 RAG 检索结果组合为大模型可使用的上下文。 |
-| DeepSeek API | 根据上下文生成结构化办理方案，不负责凭空生成高精度事务信息。 |
-| Vue 展示 | 将后端返回的办理条件、材料清单、流程、地点、来源等内容展示给用户。 |
-
-### 技术栈
-
-| 模块 | 技术 |
-| --- | --- |
-| 前端 | Vue 3、Vite、Vue Router、Axios、HTML、CSS、JavaScript |
-| 后端 | Python、FastAPI、Pydantic、SQLAlchemy、SQLite、JWT |
-| AI / RAG | Python、PDF / Word 文本解析、Chunk、Embedding、Vector Database、Metadata Filtering、Query Rewrite、Context Engineering / Context Builder、DeepSeek API、JSON 结构化输出 |
-| 测试 | FastAPI Swagger、pytest、必要时 Postman |
-| 版本控制 | Git、GitHub |
-
----
-
-## 三、项目目录结构
-
-当前计划的根目录结构如下。实际开发中如需新增目录，应先确认是否符合三人分工边界，并同步到 README 或 `docs/` 文档中。
-<img width="1700" height="1450" alt="project-structure-mindmap" src="https://github.com/user-attachments/assets/bdbce4eb-3b90-4ea9-87c4-eaded93d531f" />
-
-
+## 项目目录
 
 ```text
-bupt-campusflow/
-│
-├── README.md
-├── .gitignore
-├── .env.example
-├── requirements.txt
-│
-├── frontend/
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.js
-│   ├── src/
-│   │   ├── main.js
-│   │   ├── App.vue
-│   │   ├── router/
-│   │   │   └── index.js
-│   │   ├── api/
-│   │   │   ├── auth.js
-│   │   │   ├── profile.js
-│   │   │   ├── query.js
-│   │   │   ├── todo.js
-│   │   │   └── admin.js
-│   │   ├── views/
-│   │   │   ├── Login.vue
-│   │   │   ├── Home.vue
-│   │   │   ├── Profile.vue
-│   │   │   ├── Query.vue
-│   │   │   ├── Result.vue
-│   │   │   ├── Todo.vue
-│   │   │   ├── History.vue
-│   │   │   └── Admin.vue
-│   │   ├── components/
-│   │   │   ├── ServiceCard.vue
-│   │   │   ├── MaterialList.vue
-│   │   │   ├── ProcessSteps.vue
-│   │   │   ├── SourceList.vue
-│   │   │   └── EmptyState.vue
-│   │   └── assets/
-│   └── public/
-│
-├── backend/
-│   ├── main.py
+BUPT-CampusFlow/
+├── README.md                         # 项目说明
+├── .env.example                      # 环境变量模板，不保存真实密钥
+├── frontend/                         # Vue 3 + Vite 前端
+│   ├── package.json                  # 前端脚本和依赖
+│   ├── vite.config.js                # Vite 配置，/api 代理到后端 8000
+│   └── src/
+│       ├── App.vue                   # 前端主页面和交互逻辑
+│       ├── main.js                   # Vue 入口
+│       └── api/client.js             # Axios API client 与 JWT 注入
+├── backend/                          # FastAPI 业务后端
+│   ├── requirements.txt              # 后端 Python 依赖
+│   ├── README.md                     # B 模块说明
+│   ├── VALIDATION.md                 # 后端验证记录
+│   ├── tests/test_api.py             # 后端接口与邮件提醒测试
 │   └── app/
-│       ├── __init__.py
-│       ├── api/
-│       │   ├── auth.py
-│       │   ├── profile.py
-│       │   ├── query.py
-│       │   ├── todo.py
-│       │   └── admin.py
-│       ├── models/
-│       │   ├── user.py
-│       │   ├── profile.py
-│       │   ├── service.py
-│       │   ├── todo.py
-│       │   └── log.py
-│       ├── schemas/
-│       │   ├── auth.py
-│       │   ├── profile.py
-│       │   ├── query.py
-│       │   └── todo.py
-│       ├── services/
-│       │   ├── auth_service.py
-│       │   ├── query_service.py
-│       │   ├── todo_service.py
-│       │   └── ai_service.py
-│       ├── core/
-│       │   ├── config.py
-│       │   ├── security.py
-│       │   └── database.py
-│       └── db/
-│
-├── ai_rag/
-│   ├── __init__.py
-│   ├── ingestion/
-│   │   ├── document_loader.py
-│   │   ├── cleaner.py
-│   │   └── chunker.py
-│   ├── retrieval/
-│   │   ├── embedding.py
-│   │   ├── vector_store.py
-│   │   ├── metadata_filter.py
-│   │   └── retriever.py
-│   ├── llm/
-│   │   ├── deepseek_client.py
-│   │   ├── prompts.py
-│   │   └── output_parser.py
-│   ├── pipeline/
-│   │   ├── intent.py
-│   │   ├── context_builder.py
-│   │   ├── validator.py
-│   │   └── query_pipeline.py
-│   └── vector_db/
-│
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── demo/
-│
-├── tests/
-│   ├── backend/
-│   ├── rag/
-│   └── integration/
-│
-├── docs/
-│   ├── architecture.md
-│   ├── api-contract.md
-│   ├── database-design.md
-│   ├── rag-design.md
-│   └── team-workflow.md
-│
-└── scripts/
-    ├── init_db.py
-    └── build_vector_db.py
+│       ├── main.py                   # API 路由、启动生命周期和 Reminder 调度
+│       ├── database.py               # SQLite / SQLAlchemy 数据模型
+│       ├── schemas.py                # 请求与响应 Schema
+│       ├── security.py               # 密码哈希、JWT、鉴权
+│       ├── rag.py                    # B → C 调用边界
+│       ├── reminders.py              # Todo DDL 邮件提醒逻辑
+│       └── email_service.py          # SMTP 邮件发送
+├── airag/                            # AI/RAG 服务、知识库和向量库
+    ├── requirements.txt              # AI/RAG Python 依赖
+    ├── app.py                        # C 服务 FastAPI 入口
+    ├── retrieval.py                  # Chunk 加载、过滤、检索和来源证据查询
+    ├── embedding.py                  # Embedding 封装
+    ├── vector_store.py               # 本地向量库构建与查询
+    ├── context_builder.py            # RAG 上下文构建
+    ├── prompt.py                     # DeepSeek Prompt 约束
+    ├── llm.py                        # DeepSeek API 调用
+    ├── scripts/                      # 知识库导入和向量库构建脚本
+    ├── data/                         # raw、processed、metadata、chunks 数据
+    └── vector_db/                    # 本地向量库文件
+
 ```
 
-目录说明：
+## 环境要求
 
-| 目录或文件 | 作用 | 主要维护成员 |
-| --- | --- | --- |
-| `README.md` | 项目总说明、协作规范、本地启动指南。 | 三人共同维护 |
-| `.gitignore` | 规定不提交到 GitHub 的文件，如 `.env`、虚拟环境、数据库文件、构建产物等。 | 三人共同维护 |
-| `.env.example` | 环境变量示例文件，可提交到 GitHub，不包含真实密钥。 | 成员B为主，成员C协助 DeepSeek 配置 |
-| `requirements.txt` | Python 依赖列表，供后端和 AI/RAG 模块安装使用。 | 成员B、成员C |
-| `frontend/` | 前端工程目录，包含 Vue 页面、路由、组件和 API 调用封装。 | 成员A |
-| `frontend/src/api/` | 前端对后端接口的调用封装，如登录、画像、查询、待办、管理员接口。 | 成员A，与成员B联调 |
-| `frontend/src/views/` | 页面级组件，如登录、首页、画像、查询、结果、待办、历史、管理员页面。 | 成员A |
-| `frontend/src/components/` | 可复用 UI 组件，如材料清单、流程步骤、信息来源、空状态等。 | 成员A |
-| `backend/` | FastAPI 后端工程目录，负责接口、认证、权限、业务逻辑和系统调度。 | 成员B |
-| `backend/app/api/` | 后端路由接口层，按功能拆分认证、画像、查询、待办、管理员接口。 | 成员B |
-| `backend/app/models/` | SQLAlchemy 数据库模型。 | 成员B |
-| `backend/app/schemas/` | Pydantic 请求和响应数据模型。 | 成员B，与成员A确认接口字段 |
-| `backend/app/services/` | 业务逻辑层，组织认证、查询、待办、AI/RAG 调用等流程。 | 成员B |
-| `backend/app/core/` | 配置、安全、数据库连接等核心基础代码。 | 成员B |
-| `backend/app/db/` | 本地 SQLite 数据库文件或数据库相关资源目录。数据库文件通常不直接提交。 | 成员B |
-| `ai_rag/` | AI/RAG 模块目录，负责资料解析、向量检索、上下文构建和大模型调用。 | 成员C |
-| `ai_rag/ingestion/` | 文档加载、文本清洗、Chunk 切片流程。 | 成员C |
-| `ai_rag/retrieval/` | Embedding、Vector DB、Metadata Filtering、语义检索。 | 成员C |
-| `ai_rag/llm/` | DeepSeek API 调用、Prompt 模板、结构化输出解析。 | 成员C |
-| `ai_rag/pipeline/` | 意图识别、Context Builder、结果校验、完整查询链路。 | 成员C，与成员B联调 |
-| `ai_rag/vector_db/` | 本地生成的向量数据库目录。通常不作为主要 Git 协作对象。 | 成员C |
-| `data/raw/` | 原始制度、通知、办事指南资料。 | 成员C |
-| `data/processed/` | 清洗后、切片前后可复用的数据。 | 成员C |
-| `data/demo/` | 可重复生成数据库或演示流程的 Demo 数据。 | 三人共同维护 |
-| `tests/backend/` | 后端接口和业务逻辑测试。 | 成员B |
-| `tests/rag/` | RAG 检索、过滤、输出结构测试。 | 成员C |
-| `tests/integration/` | 前后端、后端与 RAG 的整体联调测试。 | 三人共同维护 |
-| `docs/` | 架构、接口、数据库、RAG、团队流程等补充文档。 | 三人共同维护 |
-| `scripts/init_db.py` | 初始化 SQLite 数据库。 | 成员B |
-| `scripts/build_vector_db.py` | 构建本地向量数据库。 | 成员C |
+- Python：项目未固定精确版本，建议使用 Python 3.11 或兼容依赖的 Python 3.x。
+- Node.js：用于运行 Vite 前端，建议使用当前 LTS 版本。
+- pnpm：前端仓库包含 `pnpm-lock.yaml`，推荐使用 pnpm 安装依赖。
+- 网络：首次安装依赖、首次下载 fastembed 模型、调用 DeepSeek API 时需要联网。
+- DeepSeek API Key：真实智能回答需要配置 `DEEPSEEK_API_KEY`。
+- SMTP 邮箱授权码：使用邮件提醒需要配置 SMTP 主机、端口、用户名、授权码或密码。
+- 部署方式：当前项目主要按本地三服务方式运行。
 
----
+## 安装与启动
 
-## 四、三人技术分工
+以下命令以 Windows PowerShell 为主。
 
-### 成员A：前端交互与用户体验
+1. 克隆并进入项目：
 
-成员A主要负责 `frontend/`。目标是实现学生端和管理员端的浏览器页面，让用户能够完成登录、填写画像、发起事务查询、查看办理结果、管理待办和查看历史记录。
-
-主要任务：
-
-- Vue 3 项目搭建
-- Vite 工程配置
-- 页面布局
-- 登录注册页面
-- 用户画像页面
-- 首页
-- 智能事务查询页面
-- 办理结果展示
-- 材料清单展示
-- 办理步骤展示
-- 信息来源展示
-- 个人待办页面
-- 查询历史页面
-- 管理员端页面
-- 页面加载状态
-- 空状态
-- 错误状态
-- Axios 调用 FastAPI 接口
-- A 与 B 前后端联调
-
-成员A原则：
-
-- 前端只负责输入、展示、交互和 API 调用。
-- 不要在 Vue 中写学院规则判断、年级规则判断、校区规则判断、权限核心逻辑或 RAG 逻辑。
-- 所有业务规则和权限判断应由后端处理，前端根据后端返回结果展示。
-- 接口字段以 `docs/api-contract.md` 为准，不根据自己的理解随意增删字段。
-
-成员A主要修改：
-
-- `frontend/`
-- 必要时参与修改 `docs/api-contract.md`
-- 必要时参与修改 `tests/integration/`
-
----
-
-### 成员B：后端业务与系统工程
-
-成员B主要负责 `backend/` 和 `scripts/init_db.py`。目标是搭建 FastAPI 后端、设计 SQLite 结构化数据库、完成认证权限和业务接口，并负责系统总调度。
-
-主要任务：
-
-- FastAPI 工程
-- API 设计
-- Pydantic 数据模型
-- SQLite 数据库
-- SQLAlchemy
-- 用户注册登录
-- JWT
-- 学生/管理员权限
-- 用户画像 CRUD
-- 事务数据 CRUD
-- 待办 CRUD
-- 查询历史
-- 管理员日志
-- 结构化事务信息
-- `/api/query` 核心接口
-- 后端异常处理
-- 系统总调度
-
-成员B负责的 SQLite 结构化数据：
-
-- 用户
-- 用户画像
-- 事务
-- 地点
-- 房间
-- 负责人
-- 办公时间
-- 联系方式
-- 待办
-- 查询记录
-- 权限
-- 管理日志
-
-成员B原则：
-
-- B 不重新实现 RAG。
-- B 通过明确的 Python 模块函数接口调用成员C提供的 AI/RAG 模块。
-- B 负责 `/api/query` 的接口入口、用户身份识别、权限校验、画像读取、结构化数据读取、RAG 调用编排和统一返回。
-- 数据库结构变化后，应更新 `docs/database-design.md`。
-- 接口字段变化前，应先同步成员A，并更新 `docs/api-contract.md`。
-
-成员B主要修改：
-
-- `backend/`
-- `scripts/init_db.py`
-- `docs/api-contract.md`
-- `docs/database-design.md`
-- `tests/backend/`
-- 必要时参与修改 `tests/integration/`
-
----
-
-### 成员C：AI、RAG 与个性化检索
-
-成员C主要负责 `ai_rag/`、`data/` 和 `scripts/build_vector_db.py`。目标是整理北邮制度、通知、办事指南等资料，构建可检索的知识库，并为后端提供可调用的 AI/RAG 能力模块。
-
-主要任务：
-
-- 北邮官方制度资料整理
-- PDF / Word 解析
-- 文本清洗
-- Chunk
-- Metadata
-- Embedding
-- Vector DB
-- Metadata Filtering
-- 语义检索
-- 事务意图识别
-- Query Rewrite
-- Context Builder
-- Prompt
-- DeepSeek API
-- JSON 结构化输出
-- 来源追溯
-- Validator
-- RAG 测试
-
-Metadata 至少考虑：
-
-- `service`
-- `college`
-- `degree`
-- `grade`
-- `campus`
-- `source`
-- `updated_at`
-- `status`
-
-成员C原则：
-
-- C 不负责用户登录、权限、待办、普通业务数据库 CRUD。
-- 用户身份、权限、待办、查询记录等由成员B在后端统一处理。
-- C 负责向量知识库，不维护 SQLite 结构化业务数据库中的同类信息。
-- C 提供模块函数给 B 调用，不绕过后端直接与前端交互。
-- RAG 结构变化后，应更新 `docs/rag-design.md`。
-
-成员C主要修改：
-
-- `ai_rag/`
-- `data/`
-- `scripts/build_vector_db.py`
-- `docs/rag-design.md`
-- `tests/rag/`
-- 必要时参与修改 `tests/integration/`
-
----
-
-## 五、三人接口边界
-
-### A 与 B：前后端 HTTP API 协作
-
-A 与 B 通过 HTTP API 协作。接口定义统一写在：
-
-```text
-docs/api-contract.md
+```powershell
+git clone <your-repository-url>
+cd BUPT-CampusFlow
 ```
 
-协作规则：
+2. 创建并启用 Python 虚拟环境：
 
-- A 根据 `docs/api-contract.md` 调用接口和展示数据。
-- A 不能根据自己的理解随意修改请求字段或响应字段。
-- B 修改 API 字段前必须同步 A。
-- B 修改 API 字段后必须更新 `docs/api-contract.md`。
-- 前端不重复实现后端业务规则，不在页面里硬编码学院、年级、校区等判断。
-
-### B 与 C：Python 模块函数接口协作
-
-B 与 C 通过 Python 模块函数接口协作。C 至少需要提供类似能力：
-
-```python
-recognize_intent(question)
-
-search_knowledge(
-    question,
-    profile,
-    service
-)
-
-build_context(
-    profile,
-    structured_data,
-    rag_result
-)
-
-generate_answer(context)
-
-validate_answer(...)
-```
-
-协作规则：
-
-- B 调用这些函数完成 `/api/query`。
-- B 负责读取登录用户画像，不要求前端重复传学院、年级、校区等画像字段。
-- B 负责读取 SQLite 中的结构化事务数据。
-- C 负责语义检索、Metadata Filtering、Context Builder、Prompt 和 DeepSeek API 调用。
-- C 的输出应尽量稳定为结构化 JSON，方便 B 统一封装并返回给前端。
-
-### 数据库边界
-
-B 负责 SQLite 结构化数据库。
-
-C 负责向量知识库。
-
-不要把同一类信息在两个数据库中重复维护。例如：
-
-- 地点、房间、负责人、联系方式、办公时间等高精度事务信息，优先放入 SQLite 结构化数据库。
-- 制度原文、通知原文、办事指南长文本、Chunk、Embedding、Metadata 检索索引，放入 RAG 知识库。
-
----
-
-## 六、核心 API 约定
-
-以下是 `/api/query` 的初步接口约定，用于三人对齐方向。最终字段以 `docs/api-contract.md` 为准。
-
-### POST `/api/query`
-
-用户登录后，前端主要发送：
-
-```json
-{
-  "question": "我想申请缓考"
-}
-```
-
-说明：
-
-- 用户画像由后端根据登录用户从 SQLite 读取。
-- 不要要求前端每次重复发送学院、年级、校区等数据。
-- 后端应根据登录状态识别用户身份，并结合用户画像完成个性化查询。
-
-后端建议统一返回：
-
-```json
-{
-  "success": true,
-  "data": {
-    "service": "缓考申请",
-    "applicable_to": {},
-    "conditions": [],
-    "materials": [],
-    "steps": [],
-    "location": {},
-    "contact": {},
-    "notes": [],
-    "sources": []
-  }
-}
-```
-
-字段含义：
-
-| 字段 | 含义 |
-| --- | --- |
-| `success` | 请求是否成功。 |
-| `data.service` | 识别出的事务名称，如“缓考申请”。 |
-| `data.applicable_to` | 适用对象信息，如学院、年级、培养层次、校区等。 |
-| `data.conditions` | 办理条件。 |
-| `data.materials` | 材料清单。 |
-| `data.steps` | 办理流程，可用于生成待办步骤。 |
-| `data.location` | 办理地点、房间等信息。 |
-| `data.contact` | 负责人、联系方式等信息。 |
-| `data.notes` | 注意事项。 |
-| `data.sources` | 信息来源，用于追溯回答依据。 |
-
----
-
-## 七、GitHub 协作策略
-
-本项目采用：
-
-```text
-一个 GitHub 仓库 + 多 Feature Branch
-```
-
-禁止三个人分别维护三个独立仓库。所有成员都围绕同一个 GitHub 仓库协作。
-
-主分支：
-
-```text
-main
-```
-
-要求：
-
-- `main` 始终保持可以运行或至少处于可集成状态。
-- 原则上不要直接在 `main` 上开发功能。
-- 每次开发新功能，都从 `main` 创建 Feature Branch。
-- 功能完成后，通过 Pull Request 合并回 `main`。
-
-Feature Branch 命名示例：
-
-```text
-feature/frontend-login
-feature/frontend-profile
-feature/frontend-query
-
-feature/backend-auth
-feature/backend-profile
-feature/backend-query
-feature/backend-todo
-
-feature/rag-ingestion
-feature/rag-retrieval
-feature/rag-metadata
-feature/rag-llm
-```
-
-Bug 修复分支：
-
-```text
-fix/login-token-expired
-fix/query-empty-result
-```
-
-文档分支：
-
-```text
-docs/api-contract
-docs/readme-update
-```
-
----
-
-## 八、每日标准 Git 工作流程
-
-### 每天开始写代码之前
-
-先切回 `main`，拉取最新代码：
-
-```bash
-git checkout main
-git pull origin main
-```
-
-如果今天要创建新功能分支：
-
-```bash
-git checkout -b feature/xxx
-```
-
-如果功能分支已经存在：
-
-```bash
-git checkout feature/xxx
-```
-
-然后把最新 `main` 合并到自己的功能分支：
-
-```bash
-git merge main
-```
-
-为什么需要先同步 `main`：
-
-- 其他成员可能已经合并了新接口、新数据库结构或新页面。
-- 先同步可以尽早发现冲突，避免自己写一天代码后才发现基础文件已经变了。
-- 让自己的功能分支基于最新版本开发，更容易通过 Pull Request。
-
-### 开发过程中
-
-随时查看当前修改：
-
-```bash
-git status
-```
-
-完成一个相对独立的小功能后提交：
-
-```bash
-git add .
-git commit -m "feat: add student profile page"
-```
-
-建议：
-
-- 不要一天只提交一次巨大 commit。
-- 一个 commit 尽量只做一类明确修改。
-- 提交前先看 `git status`，避免把无关文件提交进去。
-
-### 提交到 GitHub
-
-```bash
-git push origin feature/xxx
-```
-
-然后通过 GitHub：
-
-```text
-Feature Branch
-→ Pull Request
-→ main
-```
-
-禁止未经确认直接强制覆盖 `main`。
-
----
-
-## 九、Commit 规范
-
-采用简单 Conventional Commit 风格：
-
-| 类型 | 含义 |
-| --- | --- |
-| `feat` | 新功能 |
-| `fix` | 修复 Bug |
-| `docs` | 文档 |
-| `style` | 页面样式 |
-| `refactor` | 重构 |
-| `test` | 测试 |
-| `chore` | 配置或杂项 |
-
-示例：
-
-```bash
-git commit -m "feat: add student login page"
-git commit -m "feat: implement JWT authentication"
-git commit -m "feat: implement metadata filtering"
-git commit -m "feat: add RAG retrieval pipeline"
-git commit -m "fix: handle empty RAG result"
-git commit -m "fix: resolve login token issue"
-git commit -m "docs: update API contract"
-git commit -m "style: improve query result layout"
-```
-
-一个 commit 尽量对应一个相对明确的修改。
-
-不要使用以下无法说明内容的 commit message：
-
-```text
-update
-change
-修改一下
-111
-final
-final2
-真的final
-```
-
----
-
-## 十、Pull Request 规范
-
-完成一个功能后：
-
-1. Push 自己的 Feature Branch。
-2. 打开 GitHub。
-3. 创建 Pull Request。
-4. PR 目标分支选择 `main`。
-5. 简单说明做了什么、修改了哪些模块、如何测试、是否影响其他成员接口。
-
-PR 示例：
-
-```text
-Title:
-feat: implement student profile API
-
-Description:
-- 新增用户画像 CRUD 接口
-- 新增 Profile Pydantic Schema
-- 新增 SQLAlchemy Profile Model
-- 已通过 Swagger 测试
-- 前端可以开始调用 /api/profile
-```
-
-建议至少由另一名成员简单检查后再 Merge。
-
-PR 描述建议包含：
-
-| 项目 | 说明 |
-| --- | --- |
-| 做了什么 | 简要说明新增或修改的功能。 |
-| 修改了哪些模块 | 例如 `frontend/`、`backend/app/api/`、`ai_rag/retrieval/`。 |
-| 如何测试 | 说明运行了哪些命令，或用 Swagger / 页面手动验证了哪些流程。 |
-| 是否影响接口 | 如果影响 A/B/C 对接字段，必须明确写出。 |
-| 是否更新文档 | 如果接口、数据库或 RAG 结构变化，应说明已更新对应文档。 |
-
----
-
-## 十一、冲突处理原则
-
-这一部分特别写给 Git 新手。
-
-如果发现：
-
-- A 和 B 同时修改同一个文件；
-- B 和 C 同时修改 `query_service.py`；
-- 自己 `git merge main` 后出现 Conflict；
-
-不要互相直接覆盖。
-
-处理顺序：
-
-1. 停止继续修改冲突文件。
-2. 先沟通谁的版本应该保留，或者两边逻辑如何合并。
-3. 更新 `main`。
-4. 在自己的分支合并 `main`。
-5. 手动解决 Conflict。
-6. 重新运行项目。
-7. Commit。
-8. Push。
-
-禁止：
-
-```bash
-git push --force
-```
-
-除非团队明确知道自己在做什么，并且已经沟通过风险。
-
-不要通过复制整个项目文件夹覆盖别人代码的方式解决 Git 冲突。这种方式很容易把其他成员已经完成的功能覆盖掉。
-
----
-
-## 十二、各成员尽量避免修改的目录
-
-为了减少冲突，建议按以下边界开发。这不是绝对禁止，但如果需要修改其他成员主要负责区域，应先沟通。
-
-| 成员 | 主要修改目录 |
-| --- | --- |
-| 成员A | `frontend/` |
-| 成员B | `backend/`、`scripts/init_db.py` |
-| 成员C | `ai_rag/`、`data/`、`scripts/build_vector_db.py` |
-| 三人共同 | `README.md`、`docs/`、`tests/integration/` |
-
-尽量避免：
-
-- A 未沟通就修改 `backend/app/schemas/` 中的接口模型。
-- B 未沟通就修改 `frontend/src/api/` 中的前端接口封装。
-- C 未沟通就修改 `backend/app/services/query_service.py` 的业务调度逻辑。
-- 任意成员直接提交 `.env`、本地数据库文件或本地向量索引文件。
-
----
-
-## 十三、环境变量与安全
-
-根目录计划包含：
-
-```text
-.env.example
-```
-
-`.env.example` 可以上传 GitHub，用于说明需要哪些环境变量。
-
-真实配置文件：
-
-```text
-.env
-```
-
-`.env` 禁止上传 GitHub。
-
-`.env.example` 示例：
-
-```env
-DEEPSEEK_API_KEY=your_api_key_here
-JWT_SECRET_KEY=your_secret_here
-DATABASE_URL=sqlite:///./backend/app/db/campusflow.db
-```
-
-`.gitignore` 必须忽略：
-
-```gitignore
-.env
-.venv/
-venv/
-__pycache__/
-*.pyc
-node_modules/
-frontend/dist/
-*.db
-ai_rag/vector_db/*
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-```
-
-禁止把以下内容提交到 GitHub：
-
-- DeepSeek API Key
-- JWT Secret
-- 账号密码
-- 个人 Token
-- 本地 `.env`
-
-如果发现密钥已经提交到 GitHub，应立即通知组员，并更换对应密钥。
-
----
-
-## 十四、数据库和向量库协作规则
-
-### SQLite 数据库
-
-SQLite 的 `.db` 文件尽量不要多人直接同步修改。项目应通过脚本生成本地数据库：
-
-```bash
-python scripts/init_db.py
-```
-
-建议提交到 GitHub 的内容：
-
-- 数据库结构代码
-- SQLAlchemy Model
-- 初始化脚本
-- Demo 数据
-- 数据库设计文档
-
-不建议依赖上传某个人电脑上的 `campusflow.db`。
-
-可重复生成数据库的 Demo 数据可以放在：
-
-```text
-data/demo/
-```
-
-### 向量数据库
-
-向量数据库同理，`ai_rag/vector_db/` 不作为主要 Git 协作对象。
-
-成员C维护：
-
-```text
-scripts/build_vector_db.py
-```
-
-其他成员通过运行该脚本生成本地向量数据库：
-
-```bash
-python scripts/build_vector_db.py
-```
-
-应该提交：
-
-- 原始资料
-- 处理脚本
-- Metadata 结构
-- 构建脚本
-- RAG 设计文档
-
-不建议频繁提交巨大的向量索引文件。
-
----
-
-## 十五、本地启动说明
-
-以下命令为预期方式，最终以实际代码结构为准。如果项目代码尚未完成，请先完成对应目录和脚本后再执行。
-
-### 1. Clone 仓库
-
-```bash
-git clone <repository-url>
-cd bupt-campusflow
-```
-
-### 2. 创建 Python 虚拟环境
-
-```bash
+```powershell
 python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 ```
 
-Windows：
+3. 安装后端与 AI/RAG 依赖：
 
-```bash
-.venv\Scripts\activate
+```powershell
+python -m pip install -r backend\requirements.txt
+python -m pip install -r airag\requirements.txt
 ```
 
-macOS / Linux：
+4. 安装前端依赖：
 
-```bash
-source .venv/bin/activate
+```powershell
+cd frontend
+pnpm install
+cd ..
 ```
 
-### 3. 安装 Python 依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. 配置环境变量
-
-复制 `.env.example`，生成 `.env`，并填写 DeepSeek API Key、JWT Secret 等配置。
-
-Windows PowerShell：
+5. 配置环境变量：
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-macOS / Linux：
+然后编辑根目录 `.env`，按本机环境填写真实值。至少需要关注：
 
-```bash
-cp .env.example .env
+```env
+DEEPSEEK_API_KEY=your_api_key_here
+JWT_SECRET_KEY=please_use_a_long_random_secret_at_least_32_chars
+RAG_MODE=http
+RAG_URL=http://127.0.0.1:8001/generate
 ```
 
-### 5. 初始化 SQLite 数据库
+如果只想验证后端基础接口，也可以使用代码默认的 `RAG_MODE=demo`，但该模式不会调用真实 RAG 和 DeepSeek。
 
-```bash
-python scripts/init_db.py
+后端会在启动时读取根目录 `.env`。AI/RAG 服务使用进程环境变量；如需让 C 服务调用 DeepSeek，请确保启动 C 服务的终端中也能读取到 `DEEPSEEK_API_KEY`，例如在 PowerShell 中设置：
+
+```powershell
+$env:DEEPSEEK_API_KEY="your_api_key_here"
 ```
 
-### 6. 如需使用 RAG，构建向量数据库
+6. 构建或重建向量数据库：
 
-```bash
-python scripts/build_vector_db.py
+如果 `airag/vector_db/chunks.json` 不存在，或修改了 `airag/data/chunks/chunks.jsonl`，需要重新构建向量库：
+
+```powershell
+python -m airag.scripts.build_vector_db
 ```
 
-### 7. 启动 FastAPI
+该命令会读取 `airag/data/chunks/chunks.jsonl`，生成 `airag/vector_db/chunks.json`。
 
-实际命令以项目 `main.py` 结构为准，预计方式如下：
+7. 启动 AI/RAG 服务：
 
-```bash
-uvicorn backend.main:app --reload
+```powershell
+python -m uvicorn airag.app:app --host 0.0.0.0 --port 8001
 ```
 
-启动后可通过 FastAPI Swagger 检查接口：
+健康检查：
 
-```text
-http://127.0.0.1:8000/docs
+```powershell
+Invoke-RestMethod http://127.0.0.1:8001/health
 ```
 
-### 8. 启动 Vue 前端
+8. 启动业务后端：
 
-```bash
+另开一个 PowerShell 窗口(确保在根目录)：
+
+```powershell
+cd backend
+..\.venv\Scripts\Activate.ps1
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+上面激活虚拟环境命令中的路径请按实际项目位置调整；如果已经处于启用状态，可直接启动 uvicorn。
+
+健康检查：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+```
+
+9. 启动前端：
+
+另开一个 PowerShell 窗口(确保在根目录)：
+
+```powershell
 cd frontend
-npm install
-npm run dev
+pnpm run dev --host 0.0.0.0 --port 5300
 ```
 
-### 9. 浏览器访问
-
-浏览器访问 Vite 输出的本地地址，通常类似：
+浏览器本机访问：
 
 ```text
-http://localhost:5173/
+http://127.0.0.1:5300/
 ```
 
----
+`frontend/vite.config.js` 会将前端的 `/api` 请求代理到 `http://127.0.0.1:8000`。如果端口被占用，可以换用其他空闲前端端口。同一局域网中可使用运行主机 IPv4 访问，能否互通取决于网络策略和防火墙设置。
 
-## 十六、推荐开发顺序
+10. 前端构建检查：
 
-### Phase 0：项目骨架
-
-先完成基础协作结构：
-
-- GitHub 仓库
-- 目录结构
-- README
-- `.gitignore`
-- `.env.example`
-- API Contract
-
-### Phase 1：三人并行开发
-
-成员A先使用 Mock JSON 开发：
-
-- 登录
-- 画像
-- 查询
-- 结果
-- 待办
-
-成员B开发：
-
-- FastAPI
-- SQLite
-- 认证
-- 画像
-- 待办
-- 基础 API
-
-成员C开发：
-
-- 准备制度文件
-- Chunk
-- Embedding
-- Vector DB
-- Metadata
-- 基础 RAG
-
-### Phase 2：A + B 联调
-
-重点联调：
-
-- 登录
-- 用户画像
-- 待办
-- 事务查询基础接口
-
-### Phase 3：B + C 联调
-
-重点联调：
-
-- `/api/query`
-- RAG
-- Context
-- DeepSeek
-
-### Phase 4：三人整体联调
-
-完整 Demo 流程：
-
-```text
-登录
-→ 用户画像
-→ 提问
-→ RAG
-→ 办理方案
-→ 信息来源
-→ 加入待办
-→ 刷新后仍存在
+```powershell
+cd frontend
+pnpm run build
 ```
 
----
 
-## 十七、完成一个任务的 Definition of Done
+## 核心接口
 
-一个功能不能仅仅“代码写完了”就算完成。至少满足：
+前端通常通过 `/api` 访问业务后端，Vite 开发环境会把 `/api` 代理到后端服务。
 
-- 能正常运行；
-- 没有明显报错；
-- 接口格式符合约定；
-- 不破坏 `main` 已有功能；
-- 必要的异常情况有处理；
-- 已 Commit；
-- 已 Push；
-- 已创建或合并 PR；
-- 如果接口变化，更新 `docs/api-contract.md`；
-- 如果数据库结构变化，更新 `docs/database-design.md`；
-- 如果 RAG 结构变化，更新 `docs/rag-design.md`。
+| 接口 | 方法 | 作用 |
+| --- | --- | --- |
+| `/api/health` | GET | 后端健康检查，返回服务状态与 RAG 模式 |
+| `/api/auth/register` | POST | 用户注册 |
+| `/api/auth/login` | POST | 用户登录并返回 JWT |
+| `/api/auth/me` | GET | 获取当前登录用户 |
+| `/api/profile` | GET / PUT / DELETE | 获取、保存、删除用户画像 |
+| `/api/query` | POST | 提交自然语言事务问题，调用 B → C 查询链路 |
+| `/api/todos` | GET / POST | 查询和新增 Todo |
+| `/api/todos/{item_id}` | GET / PUT / DELETE | 查看、更新、删除单条 Todo |
+| `/api/reminders/check` | POST | 手动触发当前用户 Todo DDL 邮件提醒检查 |
+| `/api/history` | GET | 查询历史列表 |
+| `/api/history/{item_id}` | GET / DELETE | 回看或删除单条历史记录 |
+| `/api/affairs` | GET | 查询结构化事务数据 |
+| `/api/admin/affairs` | POST | 管理员新增事务 |
+| `/api/admin/affairs/{item_id}` | PUT / DELETE | 管理员更新或删除事务 |
+| `/api/admin/logs` | GET | 管理员查看事务操作审计 |
+| `/api/sources/evidence` | GET | 来源详情查询接口，当前前端主要展示来源文件名与页码 |
 
-建议每个任务完成时在 PR 中说明：
+AI/RAG 服务主要接口：
 
-- 改了什么；
-- 怎么测的；
-- 有没有影响其他成员；
-- 是否需要其他成员同步修改。
+| 接口 | 方法 | 作用 |
+| --- | --- | --- |
+| `/health` | GET | C 服务健康检查、Chunk 数和向量库状态 |
+| `/generate` | POST | 根据问题、画像和结构化事务数据生成 RAG 查询结果 |
+| `/sources/evidence` | GET | 按来源标题和页码查询命中的 Chunk 依据 |
 
----
+## 配置与密钥说明
 
-## 十八、组员每天开发前后的 Checklist
+`.env.example` 只保存模板；真实密钥应通过本机环境变量或未纳入 Git 的 `.env` 配置；不得将真实 API Key、邮箱授权码、SMTP 密码、个人邮箱密码或 JWT Secret 提交到 GitHub。
 
-### 开始开发前
+| 变量 | 用途 |
+| --- | --- |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key，真实 RAG 回答需要配置 |
+| `DEEPSEEK_MODEL` | DeepSeek 模型名，代码默认 `deepseek-chat` |
+| `JWT_SECRET_KEY` | JWT 签名密钥，后端要求长度至少 32 位 |
+| `DATABASE_URL` | SQLite 数据库地址，未配置时使用代码默认值 |
+| `RAG_MODE` | 后端 RAG 模式，`demo` 为演示模式，`http` 为调用 C 服务 |
+| `RAG_URL` | C 服务 `/generate` 地址，例如 `http://127.0.0.1:8001/generate` |
+| `RAG_API_KEY` | B 与 C 之间可选的 Bearer 密钥 |
+| `RAG_VECTOR_DB_PATH` | C 服务本地向量库路径，未配置时使用默认路径 |
+| `CORS_ORIGINS` | 后端允许的跨域来源列表 |
+| `SMTP_HOST` | SMTP 服务器地址，例如 `smtp.example.com` |
+| `SMTP_PORT` | SMTP 端口，例如 STARTTLS 常见 `587`，SSL 常见 `465` |
+| `SMTP_USERNAME` | SMTP 用户名 |
+| `SMTP_PASSWORD` | SMTP 授权码或密码 |
+| `SMTP_FROM` | 邮件发件人地址，未配置时使用 `SMTP_USERNAME` |
+| `SMTP_SECURITY` | SMTP 加密模式，允许 `ssl`、`starttls`、`none` |
+| `SMTP_USE_TLS` | 兼容旧配置的 TLS 开关，优先级低于 `SMTP_SECURITY` |
+| `REMINDER_CHECK_INTERVAL_MINUTES` | 后端自动扫描 Todo DDL 的间隔分钟数 |
+| `REMINDER_LEAD_HOURS` | Todo 到期前多少小时触发提醒 |
+| `REMINDER_SCHEDULER_ENABLED` | 是否启用后端 Reminder 定时任务 |
 
-- [ ] 看 GitHub 是否有新的 PR 或变更
-- [ ] `git checkout main`
-- [ ] `git pull origin main`
-- [ ] 同步自己的 Feature Branch
-- [ ] 确认今天修改哪个模块
-- [ ] 确认是否会影响其他成员接口
+163 邮箱常见配置示例：
 
-### 开发完成后
+```env
+SMTP_HOST=smtp.163.com
+SMTP_PORT=465
+SMTP_SECURITY=ssl
+SMTP_USERNAME=your_163_email@example.com
+SMTP_PASSWORD=your_smtp_authorization_code
+SMTP_FROM=your_163_email@example.com
+```
 
-- [ ] 本地运行测试
-- [ ] `git status` 检查
-- [ ] 提交清晰 Commit
-- [ ] Push Feature Branch
-- [ ] 创建或更新 PR
-- [ ] 告诉受影响的成员
-- [ ] 如接口发生变化，更新对应 `docs`
+## 常见问题
 
----
+1. 前端页面打不开
 
-## 十九、快速定位：我应该改哪里
+确认前端依赖已安装，并使用了空闲端口启动：
 
-| 我是谁 | 我主要负责 | 我优先修改 | 我需要对接谁 |
-| --- | --- | --- | --- |
-| 成员A | 前端交互与用户体验 | `frontend/` | 与 B 对接 HTTP API，与 C 对齐结果展示字段 |
-| 成员B | 后端业务与系统工程 | `backend/`、`scripts/init_db.py` | 与 A 对接接口字段，与 C 对接 RAG 函数 |
-| 成员C | AI、RAG 与个性化检索 | `ai_rag/`、`data/`、`scripts/build_vector_db.py` | 与 B 对接 Python 模块函数，与 A 对齐输出展示结构 |
+```powershell
+cd frontend
+pnpm install
+pnpm run dev --host 0.0.0.0 --port 5300
+```
 
-最重要的协作原则：
+2. 前端能打开但接口请求失败
 
-- A 不在前端写业务规则。
-- B 不重复实现 RAG。
-- C 不处理用户权限和普通业务 CRUD。
-- API 字段变化先更新 `docs/api-contract.md`。
-- 数据库结构变化先更新 `docs/database-design.md`。
-- RAG 结构变化先更新 `docs/rag-design.md`。
-- 合并代码前先确认不会覆盖其他成员工作。
+确认业务后端运行在 `http://127.0.0.1:8000`，并检查 `frontend/vite.config.js` 中 `/api` 代理目标是否与后端地址一致。
+
+3. 智能查询提示 RAG 服务异常
+
+确认 `.env` 中设置了 `RAG_MODE=http` 和正确的 `RAG_URL`，并确认 C 服务已启动：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8001/health
+```
+
+4. `vector_db` 未生成或知识库修改后检索结果没有更新
+
+重新构建向量库：
+
+```powershell
+python -m airag.scripts.build_vector_db
+```
+
+5. DeepSeek 无法生成真实回答
+
+检查 `DEEPSEEK_API_KEY` 是否已在本机 `.env` 中配置，且当前环境可以访问 DeepSeek API。未配置或调用失败时，C 服务会按代码逻辑返回检索兜底回答。
+
+6. SMTP 邮件提醒发送失败
+
+检查用户画像中是否填写邮箱，Todo 是否设置了未来截止时间，并确认 SMTP 配置、授权码、端口和 `SMTP_SECURITY` 是否匹配邮箱服务商要求。
+
+## 已知限制
+
+- 当前项目主要采用本地部署，未从代码中确认公网部署配置。
+- `localhost` / `127.0.0.1` 只能用于本机访问；局域网访问依赖运行主机持续在线、端口开放、网络互通和防火墙策略。
+- SQLite 当前属于本地数据库，适合课程项目和本地演示，不等同于生产级多实例数据库。
+- AI 回答依赖当前 `airag/data` 知识库覆盖范围；知识库缺失时不能保证回答完整。
+- 精确考试时间、地点、房间、联系人、办公时间等信息只有在结构化数据或知识库中真实存在时才能展示。
+- 修改知识库 Chunk 后必须重建向量库，否则向量检索不会自动更新。
+- 邮件提醒依赖正确 SMTP 配置、用户画像邮箱、Todo 截止时间和持续运行中的后端服务。
+- 当前查询流程以单轮自然语言查询为主，未从代码中确认真正的多轮对话状态管理。
+- 部分数据导入脚本处理 PDF、Word、Excel 等文件时可能需要本机具备对应解析依赖或运行环境，具体以脚本报错和实际环境为准。
