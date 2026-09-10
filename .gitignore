@@ -27,3 +27,5 @@ frontend/dist/
 
 # JetBrains / PyCharm / IDEA 配置
 .idea/
+
+vector_db/

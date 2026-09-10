@@ -120,11 +120,15 @@ def _score(question: str, chunk: dict[str, Any]) -> int:
     return score
 
 
-def retrieve(question: str, chunks: list[dict[str, Any]], top_k: int = 5) -> list[dict[str, Any]]:
+def keyword_retrieve(question: str, chunks: list[dict[str, Any]], top_k: int = 5) -> list[dict[str, Any]]:
     scored = [(_score(question, chunk), chunk) for chunk in chunks]
     relevant = [(score, chunk) for score, chunk in scored if score >= 3]
     relevant.sort(key=lambda item: (-item[0], str(item[1].get("chunk_id") or "")))
     return [chunk for _, chunk in relevant[:top_k]]
+
+
+def retrieve(question: str, chunks: list[dict[str, Any]], top_k: int = 5) -> list[dict[str, Any]]:
+    return keyword_retrieve(question, chunks, top_k)
 
 
 def source_from_chunk(chunk: dict[str, Any]) -> dict[str, str] | None:
