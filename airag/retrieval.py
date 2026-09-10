@@ -136,7 +136,9 @@ def source_from_chunk(chunk: dict[str, Any]) -> dict[str, str] | None:
     if not title:
         return None
     pages = str(chunk.get("source_pages") or "").strip()
-    reference = f"第{pages}页" if pages else str(chunk.get("source_file") or "来源文件").strip()
+    reference = f"第{pages}页" if re.fullmatch(r"[\d,\-\s]+", pages) else pages
+    if not reference:
+        reference = str(chunk.get("source_file") or "来源文件").strip()
     if not reference:
         return None
     return {"title": title, "reference": reference}

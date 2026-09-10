@@ -238,5 +238,17 @@
     "updated_at": "2026-04-03",
     "status": "active",
     "file": "airag/data/raw/major_transfer/teaching_affairs_brief_transfer_2026.html"
+  },
+  {
+    "id": "deferred_exam_schedule_2025_2026_2",
+    "service": "缓考申请",
+    "college": "all",
+    "grade": "all",
+    "education_level": "本科",
+    "campus": "all",
+    "source": "附件1：2025-2026学年第二学期本科生期末考试补考、缓考安排表",
+    "updated_at": null,
+    "status": "active",
+    "file": "airag/data/raw/deferred_exam_schedule/附件1：2025-2026学年第二学期本科生期末考试补考、缓考安排表.xls"
   }
 ]

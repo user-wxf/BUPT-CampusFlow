@@ -32,6 +32,7 @@ const say = (x, e = false) => {
 const fail = e => say(e.message || '请求失败', true)
 const list = value => (Array.isArray(value) ? value : [])
 const activePage = computed(() => (page.value === 'result' ? 'query' : page.value))
+const answerHtml = computed(() => renderAnswerMarkdown(result.value?.answer || '本次查询暂未返回文字建议。'))
 const profileSummary = computed(() => {
   const parts = [
     profile.value.grade ? `${profile.value.grade}级` : '',
@@ -41,6 +42,91 @@ const profileSummary = computed(() => {
   return parts.length ? parts.join(' / ') : '完善画像后获得更贴合的办理建议'
 })
 const completedCount = computed(() => todos.value.filter(item => item.completed).length)
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderInlineMarkdown(value) {
+  const placeholders = []
+  let text = escapeHtml(value)
+  text = text.replace(/`([^`\n]+)`/g, (_, code) => {
+    const token = `@@CODE${placeholders.length}@@`
+    placeholders.push(`<code>${code}</code>`)
+    return token
+  })
+  text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+  return placeholders.reduce((html, code, index) => html.replace(`@@CODE${index}@@`, code), text)
+}
+
+function renderAnswerMarkdown(markdown) {
+  const lines = String(markdown || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  const blocks = []
+  let paragraph = []
+  let listType = ''
+  let listItems = []
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return
+    blocks.push(`<p>${paragraph.map(renderInlineMarkdown).join('<br>')}</p>`)
+    paragraph = []
+  }
+  const flushList = () => {
+    if (!listItems.length) return
+    const tag = listType === 'ol' ? 'ol' : 'ul'
+    blocks.push(`<${tag}>${listItems.map(item => `<li>${renderInlineMarkdown(item)}</li>`).join('')}</${tag}>`)
+    listType = ''
+    listItems = []
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) {
+      flushParagraph()
+      flushList()
+      continue
+    }
+
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line)
+    if (heading) {
+      flushParagraph()
+      flushList()
+      const level = Math.min(heading[1].length + 2, 6)
+      blocks.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`)
+      continue
+    }
+
+    const unordered = /^[-*+]\s+(.+)$/.exec(line)
+    if (unordered) {
+      flushParagraph()
+      if (listType && listType !== 'ul') flushList()
+      listType = 'ul'
+      listItems.push(unordered[1])
+      continue
+    }
+
+    const ordered = /^\d+[.)]\s+(.+)$/.exec(line)
+    if (ordered) {
+      flushParagraph()
+      if (listType && listType !== 'ol') flushList()
+      listType = 'ol'
+      listItems.push(ordered[1])
+      continue
+    }
+
+    flushList()
+    paragraph.push(line)
+  }
+
+  flushParagraph()
+  flushList()
+  return blocks.join('')
+}
 
 function setFavicon() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#5f6875"/><path d="M18 31a14 14 0 0 1 23.7-10.1" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><path d="M46 33a14 14 0 0 1-23.7 10.1" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/><path d="M42 13v12H30" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 51V39h12" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
@@ -395,7 +481,7 @@ onMounted(async () => {
               <span>AI 办理建议</span>
               <small v-if="result.mode">生成模式：{{ result.mode }}</small>
             </div>
-            <p>{{ result.answer || '本次查询暂未返回文字建议。' }}</p>
+            <div class="markdown-answer" v-html="answerHtml"></div>
           </section>
 
           <section class="result-section">
@@ -551,7 +637,9 @@ button:disabled {
 
 .auth-shell {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(380px, 520px);
+  grid-template-columns: minmax(320px, 520px) minmax(380px, 520px);
+  column-gap: clamp(48px, 7vw, 132px);
+  justify-content: center;
   min-height: 100vh;
   background: #f4f8ff;
 }
@@ -560,7 +648,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 72px clamp(32px, 7vw, 112px);
+  padding: 72px clamp(24px, 4vw, 56px);
 }
 
 .brand-mark {
@@ -955,11 +1043,73 @@ select:focus {
   min-width: 140px;
 }
 
-.answer-card p {
+.markdown-answer {
   margin: 18px 0 0;
   color: #273449;
   font-size: 17px;
-  white-space: pre-wrap;
+  line-height: 1.72;
+}
+
+.markdown-answer > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-answer > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-answer h3,
+.markdown-answer h4,
+.markdown-answer h5,
+.markdown-answer h6 {
+  margin: 22px 0 10px;
+  color: #12213a;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.markdown-answer h3 {
+  font-size: 21px;
+}
+
+.markdown-answer h4 {
+  font-size: 19px;
+}
+
+.markdown-answer h5,
+.markdown-answer h6 {
+  font-size: 17px;
+}
+
+.markdown-answer p {
+  margin: 0 0 12px;
+}
+
+.markdown-answer ul,
+.markdown-answer ol {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 16px;
+  padding-left: 26px;
+}
+
+.markdown-answer li {
+  padding-left: 2px;
+}
+
+.markdown-answer strong {
+  color: #12213a;
+  font-weight: 800;
+}
+
+.markdown-answer code {
+  padding: 2px 6px;
+  border: 1px solid #d7e3f3;
+  border-radius: 6px;
+  color: #174ea6;
+  background: #f4f8ff;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: .92em;
 }
 
 .result-card-title,

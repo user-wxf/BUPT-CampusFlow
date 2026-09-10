@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from .retrieval import DEFAULT_CHUNKS_PATH, filter_by_metadata, load_chunks
 DEFAULT_VECTOR_DB_DIR = Path(__file__).resolve().parent / "vector_db"
 DEFAULT_VECTOR_DB_PATH = DEFAULT_VECTOR_DB_DIR / "chunks.json"
 VECTOR_DB_VERSION = 1
+SCHEDULE_DOCUMENT_PREFIX = "deferred_exam_schedule_"
 
 
 class VectorStoreError(RuntimeError):
@@ -30,6 +32,33 @@ def chunk_text(chunk: dict[str, Any]) -> str:
         for field in ("service", "title", "content")
         if str(chunk.get(field) or "").strip()
     )
+
+
+def _field_from_content(content: str, label: str) -> str:
+    match = re.search(rf"^{re.escape(label)}：(.+)$", content, flags=re.MULTILINE)
+    return str(match.group(1)).strip() if match else ""
+
+
+def _compact_text(value: str) -> str:
+    return re.sub(r"\s+", "", value).lower()
+
+
+def exact_schedule_boost(question: str, chunk: dict[str, Any]) -> float:
+    document_id = str(chunk.get("document_id") or "")
+    if not document_id.startswith(SCHEDULE_DOCUMENT_PREFIX):
+        return 0.0
+
+    content = str(chunk.get("content") or "")
+    normalized_question = _compact_text(question)
+    course_name = _field_from_content(content, "课程名称")
+    course_code = _field_from_content(content, "课程代码")
+
+    boost = 0.0
+    if course_name and _compact_text(course_name) in normalized_question:
+        boost += 0.35
+    if course_code and _compact_text(course_code) in normalized_question:
+        boost += 0.4
+    return boost
 
 
 def build_vector_db(
@@ -138,14 +167,25 @@ class LocalVectorStore:
         query_norm = float(np.linalg.norm(query_embedding))
         if query_norm == 0:
             return []
-        results: list[VectorSearchResult] = []
+        boosted_results: list[tuple[VectorSearchResult, float]] = []
         for record in candidates:
             vector = np.asarray(record["embedding"], dtype=np.float32)
             norm = float(np.linalg.norm(vector))
             if norm == 0:
                 continue
             score = float(np.dot(query_embedding, vector) / (query_norm * norm))
-            results.append(VectorSearchResult(chunk=record["chunk"], score=score))
+            boost = exact_schedule_boost(question, record["chunk"])
+            boosted_results.append((VectorSearchResult(chunk=record["chunk"], score=score + boost), boost))
+
+        if any(boost > 0 for _, boost in boosted_results):
+            boosted_results = [
+                item
+                for item in boosted_results
+                if item[1] > 0
+                or not str(item[0].chunk.get("document_id") or "").startswith(SCHEDULE_DOCUMENT_PREFIX)
+            ]
+
+        results = [result for result, _ in boosted_results]
         results.sort(key=lambda item: (-item.score, str(item.chunk.get("chunk_id") or "")))
         return results[:top_k]
 
