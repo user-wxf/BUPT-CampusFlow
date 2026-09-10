@@ -1,6 +1,8 @@
 import logging
 import os
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timezone
 from typing import Annotated
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
@@ -11,6 +13,8 @@ from sqlalchemy import select, inspect
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from .database import Base, engine, get_db, User, Profile, Affair, Todo, History, AuditLog
+from .migrations import run_migrations
+from .reminders import check_due_reminders, reminder_scheduler_loop
 from .schemas import Credentials, ProfileInput, AffairInput, TodoInput, QueryInput
 from .security import current_user, admin_user, hash_password, verify_password, token_for, secret
 from . import rag
@@ -20,7 +24,16 @@ from . import rag
 async def lifespan(app):
     secret()
     Base.metadata.create_all(engine)
+    run_migrations(engine)
+    reminder_task = None
+    if os.getenv('REMINDER_SCHEDULER_ENABLED', 'true').strip().lower() not in {'0', 'false', 'no', 'off'}:
+        reminder_task = asyncio.create_task(reminder_scheduler_loop())
+        app.state.reminder_task = reminder_task
     yield
+    if reminder_task:
+        reminder_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await reminder_task
 
 
 app = FastAPI(title='邮智办 · B 后端', version='1.0.0', lifespan=lifespan)
@@ -86,9 +99,29 @@ def paginate(db, statement, offset, limit):
     return [row(x) for x in db.scalars(statement.offset(offset).limit(limit))]
 
 
+def utc_or_none(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def same_time(left: datetime | None, right: datetime | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    return utc_or_none(left) == utc_or_none(right)
+
+
 @app.get('/api/health')
 def health():
     return ok({'status': 'ok', 'rag_mode': os.getenv('RAG_MODE', 'demo')})
+
+
+@app.get('/api/sources/evidence')
+def source_evidence(user: Student, title: str = Query(..., min_length=1, max_length=300),
+                    reference: str = Query(..., min_length=1, max_length=1000)):
+    return ok(rag.source_evidence(title, reference))
 
 
 @app.post('/api/auth/register', status_code=201)
@@ -198,7 +231,9 @@ def logs(db: DB, user: Admin, offset: int = Query(0, ge=0), limit: int = Query(2
 
 @app.post('/api/todos', status_code=201)
 def create_todo(body: TodoInput, db: DB, user: Student):
-    item = Todo(user_id=user.id, **body.model_dump())
+    data = body.model_dump()
+    data['due_at'] = utc_or_none(data['due_at'])
+    item = Todo(user_id=user.id, **data)
     db.add(item)
     db.commit()
     return ok(row(item))
@@ -217,10 +252,20 @@ def get_todo(item_id: int, db: DB, user: Student):
 @app.put('/api/todos/{item_id}')
 def update_todo(item_id: int, body: TodoInput, db: DB, user: Student):
     item = owned(db, Todo, item_id, user)
-    for key, value in body.model_dump().items():
+    data = body.model_dump()
+    data['due_at'] = utc_or_none(data['due_at'])
+    due_changed = not same_time(item.due_at, data['due_at'])
+    for key, value in data.items():
         setattr(item, key, value)
+    if due_changed:
+        item.reminder_sent_at = None
     db.commit()
     return ok(row(item))
+
+
+@app.post('/api/reminders/check')
+def check_my_reminders(db: DB, user: Student):
+    return ok(check_due_reminders(db, user_id=user.id))
 
 
 @app.delete('/api/todos/{item_id}')

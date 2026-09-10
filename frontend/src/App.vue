@@ -21,9 +21,11 @@ const todos = ref([])
 const history = ref([])
 const mode = ref('login')
 const auth = ref({ username: '', password: '' })
-const profile = ref({ college: '', grade: '', education_level: '本科', campus: '' })
+const profile = ref({ college: '', grade: '', education_level: '本科', campus: '', email: '' })
 const question = ref('我想申请缓考')
-const todo = ref({ title: '', notes: '' })
+const todo = ref({ title: '', notes: '', due_at: '' })
+const addingPlanKey = ref('')
+const addedPlanKeys = ref([])
 
 const say = (x, e = false) => {
   notice.value = x
@@ -42,6 +44,42 @@ const profileSummary = computed(() => {
   return parts.length ? parts.join(' / ') : '完善画像后获得更贴合的办理建议'
 })
 const completedCount = computed(() => todos.value.filter(item => item.completed).length)
+
+function planKey(plan) {
+  return String(plan?.affair_id ?? plan?.title ?? '')
+}
+
+function cleanSteps(plan) {
+  return [...new Set(list(plan?.steps).map(step => String(step).trim()).filter(Boolean))]
+}
+
+function planKnownFields(plan) {
+  const location = [plan?.location, plan?.room].map(value => String(value || '').trim()).filter(Boolean).join(' ')
+  return [
+    { label: '地点', value: location },
+    { label: '联系人', value: String(plan?.contact || '').trim() },
+    { label: '办公时间', value: String(plan?.office_hours || '').trim() },
+  ].filter(item => item.value)
+}
+
+function isAddingPlan(plan) {
+  return addingPlanKey.value === planKey(plan)
+}
+
+function isPlanAdded(plan) {
+  return addedPlanKeys.value.includes(planKey(plan))
+}
+
+function markPlanAdded(plan) {
+  const key = planKey(plan)
+  if (key && !addedPlanKeys.value.includes(key)) {
+    addedPlanKeys.value = [...addedPlanKeys.value, key]
+  }
+}
+
+function sourceKey(source) {
+  return `${source?.title || ''}::${source?.reference || ''}`
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -156,6 +194,48 @@ function formatTime(value) {
   }).format(date)
 }
 
+function formatDeadline(value) {
+  if (!value) return '未设置'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function localDateTimeToIso(value) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function dateTimeLocalValue(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = number => String(number).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function todoStatus(item) {
+  if (item.completed) return { label: '已完成', tone: 'done' }
+  if (!item.due_at) return { label: '正常', tone: 'normal' }
+  const due = new Date(item.due_at)
+  if (Number.isNaN(due.getTime())) return { label: '正常', tone: 'normal' }
+  const diff = due.getTime() - Date.now()
+  if (diff < 0) return { label: '已过期', tone: 'overdue' }
+  if (diff <= 24 * 60 * 60 * 1000) return { label: '24小时内到期', tone: 'soon' }
+  return { label: '正常', tone: 'normal' }
+}
+
+function todoClass(item) {
+  return `todo-${todoStatus(item).tone}`
+}
+
 function viewHistory(item) {
   if (typeof item.result === 'string') {
     try {
@@ -185,7 +265,7 @@ async function load() {
     request({ url: '/todos' }),
     request({ url: '/history' }),
   ])
-  profile.value = p || profile.value
+  profile.value = { ...profile.value, ...(p || {}) }
   todos.value = t || []
   history.value = h || []
 }
@@ -247,8 +327,12 @@ async function reloadTodos() {
 
 async function addTodo() {
   try {
-    await request({ method: 'post', url: '/todos', data: { ...todo.value, completed: false, due_at: null } })
-    todo.value = { title: '', notes: '' }
+    await request({
+      method: 'post',
+      url: '/todos',
+      data: { title: todo.value.title, notes: todo.value.notes, completed: false, due_at: localDateTimeToIso(todo.value.due_at) },
+    })
+    todo.value = { title: '', notes: '', due_at: '' }
     await reloadTodos()
   } catch (e) {
     fail(e)
@@ -268,6 +352,20 @@ async function toggle(t) {
   }
 }
 
+async function updateTodoDue(item, value) {
+  try {
+    await request({
+      method: 'put',
+      url: `/todos/${item.id}`,
+      data: { title: item.title, notes: item.notes || '', completed: item.completed, due_at: localDateTimeToIso(value) },
+    })
+    await reloadTodos()
+    say(value ? '截止时间已更新。' : '截止时间已清除。')
+  } catch (e) {
+    fail(e)
+  }
+}
+
 async function removeTodo(id) {
   try {
     await request({ method: 'delete', url: `/todos/${id}` })
@@ -278,21 +376,38 @@ async function removeTodo(id) {
 }
 
 async function addSteps(plan) {
+  const steps = cleanSteps(plan)
+  const key = planKey(plan)
+  if (!steps.length || isAddingPlan(plan) || isPlanAdded(plan)) return
+  addingPlanKey.value = key
   try {
-    await Promise.all(
-      (plan.steps || []).map(title =>
-        request({
-          method: 'post',
-          url: '/todos',
-          data: { title, notes: `来自：${plan.title}`, completed: false, due_at: null },
-        }),
+    const notes = `来自：${plan.title || '办理方案'}`
+    const existing = new Set(
+      todos.value.map(item => `${String(item.title || '').trim()}::${String(item.notes || '').trim()}`),
+    )
+    const pending = steps.filter(step => !existing.has(`${step}::${notes}`))
+    if (!pending.length) {
+      markPlanAdded(plan)
+      say('这些办理步骤已在待办中。')
+      return
+    }
+    const results = await Promise.allSettled(
+      pending.map(title =>
+        request({ method: 'post', url: '/todos', data: { title, notes, completed: false, due_at: null } }),
       ),
     )
+    const successCount = results.filter(item => item.status === 'fulfilled').length
     await reloadTodos()
-    page.value = 'todos'
-    say('办理步骤已加入待办。')
+    if (successCount === pending.length) {
+      markPlanAdded(plan)
+      say(`已将 ${successCount} 个办理步骤加入待办。`)
+    } else {
+      say(`已将 ${successCount} 个办理步骤加入待办，${pending.length - successCount} 个添加失败。`, true)
+    }
   } catch (e) {
     fail(e)
+  } finally {
+    addingPlanKey.value = ''
   }
 }
 
@@ -463,6 +578,10 @@ onMounted(async () => {
               <span>校区</span>
               <input v-model.trim="profile.campus" placeholder="例如：海南">
             </label>
+            <label>
+              <span>邮箱</span>
+              <input v-model.trim="profile.email" type="email" placeholder="例如：202421xxxx@bupt.edu.cn">
+            </label>
             <button class="primary form-submit">保存 Profile</button>
           </form>
         </section>
@@ -492,8 +611,13 @@ onMounted(async () => {
                   <span class="plan-label">方案</span>
                   <h3>{{ plan.title || '未命名办理方案' }}</h3>
                 </div>
-                <button class="ghost" type="button" :disabled="!list(plan.steps).length" @click="addSteps(plan)">
-                  将办理步骤加入 Todo
+                <button
+                  class="ghost"
+                  type="button"
+                  :disabled="!cleanSteps(plan).length || isAddingPlan(plan) || isPlanAdded(plan)"
+                  @click="addSteps(plan)"
+                >
+                  {{ isAddingPlan(plan) ? '加入中...' : isPlanAdded(plan) ? '已加入待办' : '一键加入待办' }}
                 </button>
               </div>
 
@@ -507,17 +631,20 @@ onMounted(async () => {
                 </div>
 
                 <div class="info-block">
-                  <h4>办理地点 / 联系信息</h4>
-                  <p><b>地点：</b>{{ plan.location || '暂无' }} {{ plan.room || '' }}</p>
-                  <p><b>联系人：</b>{{ plan.contact || '暂无' }}</p>
-                  <p><b>办公时间：</b>{{ plan.office_hours || '暂无' }}</p>
+                  <h4>已知的办理信息</h4>
+                  <template v-if="planKnownFields(plan).length">
+                    <p v-for="item in planKnownFields(plan)" :key="item.label">
+                      <b>{{ item.label }}：</b>{{ item.value }}
+                    </p>
+                  </template>
+                  <p v-else class="empty-inline">暂未查到地点、联系人或办公时间</p>
                 </div>
               </div>
 
               <div class="steps-block">
                 <h4>办理步骤</h4>
-                <ol v-if="list(plan.steps).length" class="steps-list">
-                  <li v-for="x in list(plan.steps)" :key="x">
+                <ol v-if="cleanSteps(plan).length" class="steps-list">
+                  <li v-for="x in cleanSteps(plan)" :key="x">
                     <span>{{ x }}</span>
                   </li>
                 </ol>
@@ -532,7 +659,7 @@ onMounted(async () => {
           <section class="result-section">
             <h2>信息来源</h2>
             <div v-if="list(result.sources).length" class="source-grid">
-              <article v-for="s in list(result.sources)" :key="`${s.title || ''}-${s.reference || ''}`" class="source-card">
+              <article v-for="s in list(result.sources)" :key="sourceKey(s)" class="source-card">
                 <strong>{{ s.title || '来源资料' }}</strong>
                 <span>{{ s.reference || '暂无引用信息' }}</span>
               </article>
@@ -561,19 +688,35 @@ onMounted(async () => {
           <form class="todo-form" @submit.prevent="addTodo">
             <input v-model.trim="todo.title" placeholder="待办标题" required>
             <input v-model.trim="todo.notes" placeholder="备注（可选）">
+            <input v-model="todo.due_at" type="datetime-local" aria-label="截止时间">
             <button class="primary">添加</button>
           </form>
         </section>
 
         <div v-if="!todos.length" class="empty-card">暂无待办。</div>
-        <article v-for="t in todos" :key="t.id" class="todo-card">
+        <article v-for="t in todos" :key="t.id" class="todo-card" :class="todoClass(t)">
           <label class="check-wrap">
             <input :checked="t.completed" type="checkbox" @change="toggle(t)">
             <span></span>
           </label>
           <div class="todo-body" :class="{ done: t.completed }">
-            <strong>{{ t.title }}</strong>
+            <div class="todo-title-row">
+              <strong>{{ t.title }}</strong>
+              <span class="todo-state" :class="todoStatus(t).tone">{{ todoStatus(t).label }}</span>
+            </div>
             <p v-if="t.notes">{{ t.notes }}</p>
+            <div class="todo-meta">
+              <span>截止时间：{{ formatDeadline(t.due_at) }}</span>
+              <span v-if="t.reminder_sent_at">已邮件提醒</span>
+            </div>
+            <label class="due-editor">
+              <span>修改 DDL</span>
+              <input
+                type="datetime-local"
+                :value="dateTimeLocalValue(t.due_at)"
+                @change="updateTodoDue(t, $event.target.value)"
+              >
+            </label>
           </div>
           <button class="text-button danger" type="button" @click="removeTodo(t.id)">删除</button>
         </article>
@@ -1237,6 +1380,7 @@ select:focus {
 .source-card {
   display: grid;
   gap: 6px;
+  align-content: start;
   padding: 14px;
   border: 1px solid #dfe8f5;
   border-radius: 8px;
@@ -1268,7 +1412,7 @@ select:focus {
 
 .todo-form {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(190px, .8fr) auto;
   gap: 12px;
 }
 
@@ -1327,6 +1471,13 @@ select:focus {
   min-width: 0;
 }
 
+.todo-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .todo-body strong,
 .history-card strong {
   display: block;
@@ -1336,6 +1487,68 @@ select:focus {
 
 .todo-body p {
   margin: 4px 0 0;
+}
+
+.todo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.todo-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #edf5ff;
+  color: #225aab;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.todo-state.soon {
+  background: #fff7e8;
+  color: #9a5b00;
+}
+
+.todo-state.overdue {
+  background: #fff1f3;
+  color: #b42332;
+}
+
+.todo-state.done {
+  background: #effbf5;
+  color: #17633f;
+}
+
+.todo-card.todo-soon {
+  border-color: #f3d49b;
+}
+
+.todo-card.todo-overdue {
+  border-color: #fac8ce;
+}
+
+.due-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.due-editor span {
+  margin: 0;
+  font-size: 13px;
+}
+
+.due-editor input {
+  width: min(230px, 100%);
+  height: 36px;
 }
 
 .todo-body.done strong,

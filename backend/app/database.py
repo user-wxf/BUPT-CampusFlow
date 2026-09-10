@@ -45,6 +45,7 @@ class Profile(Base):
     grade: Mapped[str] = mapped_column(String(30), default='')
     education_level: Mapped[str] = mapped_column(String(30), default='')
     campus: Mapped[str] = mapped_column(String(100), default='')
+    email: Mapped[str] = mapped_column(String(254), default='')
 
 
 class Affair(Base):
@@ -71,6 +72,7 @@ class Todo(Base):
     notes: Mapped[str] = mapped_column(Text, default='')
     completed: Mapped[bool] = mapped_column(default=False)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
