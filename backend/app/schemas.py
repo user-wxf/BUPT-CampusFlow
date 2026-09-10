@@ -1,6 +1,9 @@
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+EMAIL_PATTERN = r'^[^@\s]+@[^@\s]+\.[^@\s]+$'
 
 
 class StrictModel(BaseModel):
@@ -18,6 +21,16 @@ class ProfileInput(StrictModel):
     grade: str = Field(default='', max_length=30)
     education_level: str = Field(default='', max_length=30)
     campus: str = Field(default='', max_length=100)
+    email: str = Field(default='', max_length=254)
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        import re
+        email = value.strip()
+        if email and not re.match(EMAIL_PATTERN, email):
+            raise ValueError('邮箱格式不正确')
+        return email
 
 
 class Source(StrictModel):

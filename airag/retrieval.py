@@ -1,3 +1,4 @@
+import csv
 import json
 import re
 from pathlib import Path
@@ -19,6 +20,7 @@ REQUIRED_CHUNK_FIELDS = (
     "source_pages",
 )
 DEFAULT_CHUNKS_PATH = Path(__file__).resolve().parent / "data" / "chunks" / "chunks.jsonl"
+DEFAULT_SOURCE_MANIFEST_PATH = Path(__file__).resolve().parent / "data" / "metadata" / "source_manifest.csv"
 
 KEY_TERMS = (
     "缓考",
@@ -120,11 +122,15 @@ def _score(question: str, chunk: dict[str, Any]) -> int:
     return score
 
 
-def retrieve(question: str, chunks: list[dict[str, Any]], top_k: int = 5) -> list[dict[str, Any]]:
+def keyword_retrieve(question: str, chunks: list[dict[str, Any]], top_k: int = 5) -> list[dict[str, Any]]:
     scored = [(_score(question, chunk), chunk) for chunk in chunks]
     relevant = [(score, chunk) for score, chunk in scored if score >= 3]
     relevant.sort(key=lambda item: (-item[0], str(item[1].get("chunk_id") or "")))
     return [chunk for _, chunk in relevant[:top_k]]
+
+
+def retrieve(question: str, chunks: list[dict[str, Any]], top_k: int = 5) -> list[dict[str, Any]]:
+    return keyword_retrieve(question, chunks, top_k)
 
 
 def source_from_chunk(chunk: dict[str, Any]) -> dict[str, str] | None:
@@ -132,10 +138,55 @@ def source_from_chunk(chunk: dict[str, Any]) -> dict[str, str] | None:
     if not title:
         return None
     pages = str(chunk.get("source_pages") or "").strip()
-    reference = f"第{pages}页" if pages else str(chunk.get("source_file") or "来源文件").strip()
+    reference = f"第{pages}页" if re.fullmatch(r"[\d,\-\s]+", pages) else pages
+    if not reference:
+        reference = str(chunk.get("source_file") or "来源文件").strip()
     if not reference:
         return None
     return {"title": title, "reference": reference}
+
+
+def official_urls_by_title(path: str | Path = DEFAULT_SOURCE_MANIFEST_PATH) -> dict[str, str]:
+    manifest_path = Path(path)
+    if not manifest_path.exists():
+        return {}
+    urls: dict[str, str] = {}
+    with manifest_path.open("r", encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            title = str(row.get("title") or "").strip()
+            url = str(row.get("source_url") or "").strip()
+            if title and url:
+                urls[title] = url
+    return urls
+
+
+def source_evidence(title: str, reference: str, limit: int = 8) -> dict[str, Any]:
+    expected = {"title": title.strip(), "reference": reference.strip()}
+    matched = []
+    for chunk in load_chunks():
+        source = source_from_chunk(chunk)
+        if source != expected:
+            continue
+        matched.append(
+            {
+                "chunk_id": chunk.get("chunk_id"),
+                "document_id": chunk.get("document_id"),
+                "title": chunk.get("title"),
+                "content": chunk.get("content"),
+                "source_file": chunk.get("source_file"),
+                "source_pages": chunk.get("source_pages"),
+            }
+        )
+        if len(matched) >= limit:
+            break
+
+    urls = official_urls_by_title()
+    return {
+        "title": expected["title"],
+        "reference": expected["reference"],
+        "official_url": urls.get(expected["title"], ""),
+        "chunks": matched,
+    }
 
 
 def dedupe_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
