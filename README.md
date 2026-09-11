@@ -26,7 +26,7 @@
 - 前端：Vue 3、Vite、Axios、原生 CSS。
 - 业务后端：FastAPI、Pydantic、SQLAlchemy、PyJWT、SQLite、httpx。
 - AI/RAG 服务：FastAPI、Pydantic、fastembed、NumPy、本地向量库 JSON、Metadata Filtering、RAG Context Builder、DeepSeek API。
-- 数据库：SQLite，默认数据库地址由 `DATABASE_URL` 控制，代码默认值为 `sqlite:///./youzhiban.db`。
+- 数据库：SQLite，默认数据库地址由 `DATABASE_URL` 控制，代码默认值为 `sqlite:///./backend/youzhiban.db`。
 - Embedding：默认使用 `BAAI/bge-small-zh-v1.5`，由 `fastembed` 在构建向量库时使用。
 - 邮件：Python `smtplib`，支持 `SMTP_SSL`、`SMTP + starttls()` 和无加密连接。
 
