@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Callable
 
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .database import Profile, SessionLocal, Todo
 from .email_service import send_deadline_email
 from .schemas import EMAIL_PATTERN
+from .time_utils import as_shanghai_naive, now_shanghai_naive
 
 
 SendEmail = Callable[..., None]
@@ -31,13 +32,11 @@ def reminder_lead_hours() -> float:
 
 def reminder_interval_seconds() -> float:
     minutes = _env_float("REMINDER_CHECK_INTERVAL_MINUTES", 5.0, 0.1)
-    return minutes * 60
+    return min(minutes * 60, 60.0)
 
 
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+def reminder_overdue_grace_minutes() -> float:
+    return _env_float("REMINDER_OVERDUE_GRACE_MINUTES", 30.0, 0.0)
 
 
 def _valid_email(value: str) -> bool:
@@ -52,8 +51,9 @@ def check_due_reminders(
     lead_hours: float | None = None,
     send_email: SendEmail | None = None,
 ) -> dict[str, int]:
-    current = _as_utc(now or datetime.now(timezone.utc))
+    current = as_shanghai_naive(now) if now else now_shanghai_naive()
     lead = timedelta(hours=reminder_lead_hours() if lead_hours is None else lead_hours)
+    overdue_grace = timedelta(minutes=reminder_overdue_grace_minutes())
     sender = send_email or send_deadline_email
     stats = {"checked": 0, "eligible": 0, "sent": 0, "failed": 0}
 
@@ -66,8 +66,8 @@ def check_due_reminders(
         if todo.completed or todo.due_at is None or todo.reminder_sent_at is not None:
             continue
 
-        due_at = _as_utc(todo.due_at)
-        if due_at <= current or due_at - current > lead:
+        due_at = as_shanghai_naive(todo.due_at)
+        if due_at is None or due_at - current > lead or current - due_at > overdue_grace:
             continue
 
         profile = db.get(Profile, todo.user_id)

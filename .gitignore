@@ -15,6 +15,7 @@ __pycache__/
 .pytest_cache/
 # npm 安装的依赖
 node_modules/
+.pnpm-store/
 
 # Vue 构建后的产物
 frontend/dist/

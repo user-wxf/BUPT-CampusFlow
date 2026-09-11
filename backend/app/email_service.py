@@ -1,7 +1,9 @@
 import os
 import smtplib
-from datetime import datetime, timezone
+from datetime import datetime
 from email.message import EmailMessage
+
+from .time_utils import format_shanghai
 
 
 class EmailConfigError(RuntimeError):
@@ -47,10 +49,7 @@ def _required_config() -> dict[str, str | int | bool]:
 
 
 def _display_time(value: datetime) -> str:
-    due_at = value
-    if due_at.tzinfo is None:
-        due_at = due_at.replace(tzinfo=timezone.utc)
-    return due_at.astimezone().strftime("%Y-%m-%d %H:%M")
+    return format_shanghai(value)
 
 
 def send_deadline_email(*, to_email: str, title: str, due_at: datetime, notes: str = "") -> None:

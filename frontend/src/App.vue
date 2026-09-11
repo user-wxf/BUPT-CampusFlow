@@ -196,7 +196,7 @@ function formatTime(value) {
 
 function formatDeadline(value) {
   if (!value) return '未设置'
-  const date = new Date(value)
+  const date = parseTodoDate(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',
@@ -207,15 +207,26 @@ function formatDeadline(value) {
   }).format(date)
 }
 
+function parseTodoDate(value) {
+  const text = String(value || '').trim()
+  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(text)
+  return new Date(hasTimezone ? text : text.replace(' ', 'T'))
+}
+
 function localDateTimeToIso(value) {
   if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+  const date = parseTodoDate(value)
+  if (Number.isNaN(date.getTime())) return null
+  return value.length === 16 ? `${value}:00` : value
 }
 
 function dateTimeLocalValue(value) {
   if (!value) return ''
-  const date = new Date(value)
+  const text = String(value).trim()
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text) && !/([zZ]|[+-]\d{2}:?\d{2})$/.test(text)) {
+    return text.slice(0, 16)
+  }
+  const date = parseTodoDate(value)
   if (Number.isNaN(date.getTime())) return ''
   const pad = number => String(number).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
@@ -224,7 +235,7 @@ function dateTimeLocalValue(value) {
 function todoStatus(item) {
   if (item.completed) return { label: '已完成', tone: 'done' }
   if (!item.due_at) return { label: '正常', tone: 'normal' }
-  const due = new Date(item.due_at)
+  const due = parseTodoDate(item.due_at)
   if (Number.isNaN(due.getTime())) return { label: '正常', tone: 'normal' }
   const diff = due.getTime() - Date.now()
   if (diff < 0) return { label: '已过期', tone: 'overdue' }
@@ -300,8 +311,15 @@ function logout() {
 }
 
 async function saveProfile() {
+  const payload = {
+    college: profile.value.college || '',
+    grade: profile.value.grade || '',
+    education_level: profile.value.education_level || '',
+    campus: profile.value.campus || '',
+    email: profile.value.email || '',
+  }
   try {
-    profile.value = await request({ method: 'put', url: '/profile', data: profile.value })
+    profile.value = { ...profile.value, ...(await request({ method: 'put', url: '/profile', data: payload })) }
     say('画像已保存。')
   } catch (e) {
     fail(e)
