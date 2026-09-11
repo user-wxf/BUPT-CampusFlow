@@ -44,41 +44,65 @@ AI/RAG 服务 C（检索 / Metadata Filtering / DeepSeek）
 
 ```text
 BUPT-CampusFlow/
-├── README.md                         # 项目说明
-├── .env.example                      # 环境变量模板，不保存真实密钥
-├── frontend/                         # Vue 3 + Vite 前端
-│   ├── package.json                  # 前端脚本和依赖
-│   ├── vite.config.js                # Vite 配置，/api 代理到后端 8000
-│   └── src/
-│       ├── App.vue                   # 前端主页面和交互逻辑
-│       ├── main.js                   # Vue 入口
-│       └── api/client.js             # Axios API client 与 JWT 注入
-├── backend/                          # FastAPI 业务后端
-│   ├── requirements.txt              # 后端 Python 依赖
-│   ├── README.md                     # B 模块说明
-│   ├── VALIDATION.md                 # 后端验证记录
-│   ├── tests/test_api.py             # 后端接口与邮件提醒测试
-│   └── app/
-│       ├── main.py                   # API 路由、启动生命周期和 Reminder 调度
-│       ├── database.py               # SQLite / SQLAlchemy 数据模型
-│       ├── schemas.py                # 请求与响应 Schema
-│       ├── security.py               # 密码哈希、JWT、鉴权
-│       ├── rag.py                    # B → C 调用边界
-│       ├── reminders.py              # Todo DDL 邮件提醒逻辑
-│       └── email_service.py          # SMTP 邮件发送
-├── airag/                            # AI/RAG 服务、知识库和向量库
-    ├── requirements.txt              # AI/RAG Python 依赖
-    ├── app.py                        # C 服务 FastAPI 入口
-    ├── retrieval.py                  # Chunk 加载、过滤、检索和来源证据查询
-    ├── embedding.py                  # Embedding 封装
-    ├── vector_store.py               # 本地向量库构建与查询
-    ├── context_builder.py            # RAG 上下文构建
-    ├── prompt.py                     # DeepSeek Prompt 约束
-    ├── llm.py                        # DeepSeek API 调用
-    ├── scripts/                      # 知识库导入和向量库构建脚本
-    ├── data/                         # raw、processed、metadata、chunks 数据
-    └── vector_db/                    # 本地向量库文件
-
+├── frontend/                         # Vue 3 + Vite 前端应用
+│   ├── src/
+│   │   ├── App.vue                    # 前端主页面与核心交互逻辑
+│   │   ├── main.js                    # Vue 应用入口
+│   │   └── api/
+│   │       └── client.js              # Axios 请求封装与 JWT 自动携带
+│   ├── index.html                     # 前端 HTML 入口
+│   ├── package.json                   # 前端依赖与启动脚本
+│   ├── pnpm-lock.yaml                 # pnpm 锁定文件
+│   ├── pnpm-workspace.yaml            # pnpm 工作区配置
+│   └── vite.config.js                 # Vite 开发服务器与 /api 代理配置
+│
+├── backend/                           # FastAPI 业务后端
+│   ├── app/
+│   │   ├── main.py                    # FastAPI 应用入口、路由与中间件
+│   │   ├── database.py                # SQLAlchemy 数据库模型与连接配置
+│   │   ├── schemas.py                 # Pydantic 请求/响应数据模型
+│   │   ├── security.py                # 密码哈希、JWT 签发与鉴权
+│   │   ├── rag.py                     # 后端调用 AI/RAG 服务的适配层
+│   │   ├── reminders.py               # Todo DDL 邮件提醒调度与检查逻辑
+│   │   ├── email_service.py           # SMTP 邮件发送服务
+│   │   ├── migrations.py              # 本地 SQLite 轻量迁移
+│   │   ├── config.py                  # 后端环境变量加载与路径配置
+│   │   ├── time_utils.py              # 北京时间处理工具
+│   │   └── create_admin.py            # 管理员账号创建脚本
+│   ├── tests/
+│   │   └── test_api.py                # 后端接口与邮件提醒相关测试
+│   ├── requirements.txt               # 后端 Python 依赖
+│   ├── README.md                      # 后端模块说明
+│   ├── VALIDATION.md                  # 后端验证记录
+│   └── youzhiban.db                   # 本地 SQLite 数据库文件
+│
+├── airag/                             # AI / RAG 知识库服务
+│   ├── app.py                         # AI/RAG FastAPI 服务入口
+│   ├── config.py                      # RAG 服务环境变量加载
+│   ├── schemas.py                     # RAG 请求/响应 Schema
+│   ├── retrieval.py                   # 向量检索逻辑
+│   ├── embedding.py                   # Embedding 模型加载与编码
+│   ├── vector_store.py                # 向量库读写与检索封装
+│   ├── context_builder.py             # 检索上下文构建
+│   ├── prompt.py                      # LLM 提示词组织
+│   ├── llm.py                         # DeepSeek / LLM 调用逻辑
+│   ├── requirements.txt               # AI/RAG Python 依赖
+│   ├── scripts/
+│   │   ├── build_vector_db.py         # 根据 chunks 重建向量库
+│   │   ├── ingest_documents.py        # 制度资料导入与处理脚本
+│   │   └── ingest_deferred_exam_schedule.py
+│   │                                   # 缓考/补考安排表结构化导入脚本
+│   ├── data/
+│   │   ├── raw/                       # 原始制度资料与业务文件
+│   │   ├── processed/                 # 清洗后的 Markdown / JSONL 数据
+│   │   ├── metadata/                  # 文档 Metadata、manifest 与处理报告
+│   │   └── chunks/
+│   │       └── chunks.jsonl           # RAG 检索使用的知识 Chunk
+│   └── vector_db/                     # 本地向量数据库文件
+│
+├── .env.example                       # 环境变量模板，不包含真实密钥
+├── .gitignore                         # Git 忽略规则
+└── README.md                          # 项目总说明文档
 ```
 
 ## 环境要求
