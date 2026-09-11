@@ -1,7 +1,10 @@
-import os
 from datetime import datetime, timezone
 from sqlalchemy import create_engine, event, ForeignKey, JSON, String, Text, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from .config import database_url, load_project_env
+
+
+load_project_env()
 
 
 def now():
@@ -12,7 +15,7 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(os.getenv('DATABASE_URL', 'sqlite:///./youzhiban.db'),
+engine = create_engine(database_url(),
                        connect_args={'check_same_thread': False, 'timeout': 15})
 
 

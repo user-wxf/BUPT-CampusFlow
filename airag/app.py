@@ -5,6 +5,10 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
+from .config import load_project_env
+
+load_project_env()
+
 from .context_builder import build_context
 from .llm import DeepSeekError, call_deepseek
 from .prompt import build_deepseek_answer_prompt
@@ -48,6 +52,7 @@ def health() -> dict[str, Any]:
         "vector_db_ready": status["ready"],
         "vector_db_chunks": status["chunks"],
         "embedding_model": status["model"],
+        "deepseek_configured": bool(os.getenv("DEEPSEEK_API_KEY", "").strip()),
     }
 
 

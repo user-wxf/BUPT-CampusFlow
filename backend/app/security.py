@@ -1,8 +1,3 @@
-from pathlib import Path
-from dotenv import load_dotenv
-
-# security.py → app → backend → 项目根目录
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 import hashlib
 import hmac
 import os
@@ -12,7 +7,10 @@ import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from .config import load_project_env
 from .database import get_db, User
+
+load_project_env()
 
 bearer = HTTPBearer(auto_error=False)
 

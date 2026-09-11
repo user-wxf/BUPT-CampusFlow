@@ -3,6 +3,11 @@ from typing import Any
 
 import httpx
 
+from .config import load_project_env
+
+
+load_project_env()
+
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_CHAT_COMPLETIONS_PATH = "/chat/completions"

@@ -3,7 +3,11 @@ import os
 import httpx
 from fastapi import HTTPException
 from pydantic import ValidationError
+from .config import load_project_env, normalized_rag_mode
 from .schemas import QueryResult
+
+
+load_project_env()
 
 
 def _rag_headers() -> dict[str, str]:
@@ -18,7 +22,7 @@ def _rag_endpoint(path: str) -> str:
 
 
 def generate(question: str, profile: dict, affairs: list[dict]) -> dict:
-    mode = os.getenv('RAG_MODE', 'demo')
+    mode = normalized_rag_mode()
     if mode == 'demo':
         fields = ('id', 'title', 'materials', 'steps', 'location', 'room', 'contact', 'office_hours', 'sources')
         plans = []
@@ -47,7 +51,7 @@ def generate(question: str, profile: dict, affairs: list[dict]) -> dict:
 
 
 def source_evidence(title: str, reference: str) -> dict:
-    if os.getenv('RAG_MODE', 'demo') != 'http':
+    if normalized_rag_mode() != 'http':
         return {'title': title, 'reference': reference, 'official_url': '', 'chunks': []}
     try:
         with httpx.Client(timeout=httpx.Timeout(10, connect=3), follow_redirects=False) as client:

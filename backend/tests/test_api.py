@@ -87,6 +87,27 @@ def test_profiles_and_todo_isolation(client):
     assert client.get('/api/profile', headers=a).json()['data'] is None
 
 
+def test_todo_deadline_keeps_shanghai_local_time(client):
+    headers = auth(client, 'deadline')
+    due_at = '2026-09-11T20:15:00'
+    todo = client.post('/api/todos', headers=headers, json={'title': '本地时间测试', 'due_at': due_at}).json()['data']
+    assert todo['due_at'].startswith(due_at)
+
+    with client.sessions() as db:
+        stored = db.scalar(select(Todo).where(Todo.id == todo['id']))
+        assert stored.due_at.tzinfo is None
+        assert stored.due_at.hour == 20
+        assert stored.due_at.minute == 15
+
+    updated_at = '2026-09-12T08:05:00'
+    updated = client.put(
+        f"/api/todos/{todo['id']}",
+        headers=headers,
+        json={'title': '本地时间测试', 'due_at': updated_at},
+    ).json()['data']
+    assert updated['due_at'].startswith(updated_at)
+
+
 def test_due_reminders(client):
     sent = []
     now = datetime(2026, 9, 11, 10, 0, tzinfo=timezone.utc)
@@ -135,6 +156,26 @@ def test_due_reminders(client):
     assert client.post('/api/reminders/check').status_code == 401
     manual = client.post('/api/reminders/check', headers=no_email_headers).json()['data']
     assert manual == {'checked': 1, 'eligible': 0, 'sent': 0, 'failed': 0}
+
+
+def test_due_reminders_send_recently_overdue_tasks(client):
+    sent = []
+    now = datetime(2026, 9, 11, 10, 0)
+    headers = auth(client, 'recentdue')
+    assert client.put('/api/profile', headers=headers, json={'email': 'recentdue@bupt.edu.cn'}).status_code == 200
+    client.post(
+        '/api/todos',
+        headers=headers,
+        json={'title': '一分钟提醒测试', 'due_at': (now - timedelta(minutes=3)).isoformat()},
+    )
+
+    def send_ok(**kwargs):
+        sent.append(kwargs)
+
+    with client.sessions() as db:
+        stats = check_due_reminders(db, now=now, send_email=send_ok)
+        assert stats == {'checked': 1, 'eligible': 1, 'sent': 1, 'failed': 0}
+        assert sent[0]['to_email'] == 'recentdue@bupt.edu.cn'
 
 
 def test_email_service_security_modes(monkeypatch):

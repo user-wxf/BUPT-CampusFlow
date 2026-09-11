@@ -2,7 +2,7 @@ import logging
 import os
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Annotated
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
@@ -12,11 +12,16 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, inspect
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from .config import load_project_env, normalized_rag_mode
+
+load_project_env()
+
 from .database import Base, engine, get_db, User, Profile, Affair, Todo, History, AuditLog
 from .migrations import run_migrations
 from .reminders import check_due_reminders, reminder_scheduler_loop
 from .schemas import Credentials, ProfileInput, AffairInput, TodoInput, QueryInput
 from .security import current_user, admin_user, hash_password, verify_password, token_for, secret
+from .time_utils import as_shanghai_naive
 from . import rag
 
 
@@ -38,7 +43,11 @@ async def lifespan(app):
 
 app = FastAPI(title='邮智办 · B 后端', version='1.0.0', lifespan=lifespan)
 app.add_middleware(CORSMiddleware,
-                   allow_origins=os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(','),
+                   allow_origins=os.getenv(
+                       'CORS_ORIGINS',
+                       'http://localhost:5173,http://127.0.0.1:5173,'
+                       'http://localhost:5300,http://127.0.0.1:5300,http://10.180.22.6:5300',
+                   ).split(','),
                    allow_credentials=False, allow_methods=['GET', 'POST', 'PUT', 'DELETE'],
                    allow_headers=['Authorization', 'Content-Type'])
 DB = Annotated[Session, Depends(get_db)]
@@ -99,23 +108,19 @@ def paginate(db, statement, offset, limit):
     return [row(x) for x in db.scalars(statement.offset(offset).limit(limit))]
 
 
-def utc_or_none(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
 def same_time(left: datetime | None, right: datetime | None) -> bool:
     if left is None or right is None:
         return left is right
-    return utc_or_none(left) == utc_or_none(right)
+    return as_shanghai_naive(left) == as_shanghai_naive(right)
 
 
 @app.get('/api/health')
 def health():
-    return ok({'status': 'ok', 'rag_mode': os.getenv('RAG_MODE', 'demo')})
+    return ok({
+        'status': 'ok',
+        'rag_mode': normalized_rag_mode(),
+        'rag_url_configured': bool(os.getenv('RAG_URL', '').strip()),
+    })
 
 
 @app.get('/api/sources/evidence')
@@ -232,7 +237,7 @@ def logs(db: DB, user: Admin, offset: int = Query(0, ge=0), limit: int = Query(2
 @app.post('/api/todos', status_code=201)
 def create_todo(body: TodoInput, db: DB, user: Student):
     data = body.model_dump()
-    data['due_at'] = utc_or_none(data['due_at'])
+    data['due_at'] = as_shanghai_naive(data['due_at'])
     item = Todo(user_id=user.id, **data)
     db.add(item)
     db.commit()
@@ -253,7 +258,7 @@ def get_todo(item_id: int, db: DB, user: Student):
 def update_todo(item_id: int, body: TodoInput, db: DB, user: Student):
     item = owned(db, Todo, item_id, user)
     data = body.model_dump()
-    data['due_at'] = utc_or_none(data['due_at'])
+    data['due_at'] = as_shanghai_naive(data['due_at'])
     due_changed = not same_time(item.due_at, data['due_at'])
     for key, value in data.items():
         setattr(item, key, value)
